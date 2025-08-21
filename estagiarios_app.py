@@ -267,9 +267,9 @@ def main():
 
 if os.path.exists(LOGO_FILE):
     logo = Image.open(LOGO_FILE)
-    basewidth = 100
+    basewidth = 500
     wpercent = (basewidth / float(logo.size[0]))
-    hsize = int((float(logo.size[1]) * float(wpercent)))
+    hsize = int((float(logo.size[3]) * float(wpercent)))
     logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
     st.image(logo, use_container_width=True)
 
@@ -458,4 +458,5 @@ if os.path.exists(LOGO_FILE):
 
 if __name__ == "__main__":
     main()
+
 
