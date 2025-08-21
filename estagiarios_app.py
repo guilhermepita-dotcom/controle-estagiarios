@@ -248,9 +248,9 @@ def highlight_ultimo_ano(row):
 def exibir_logo():
     if os.path.exists(LOGO_FILE):
         logo = Image.open(LOGO_FILE)
-        wpercent = (200 / float(logo.size[0]))
+        wpercent = (100 / float(logo.size[1]))
         hsize = int((float(logo.size[1]) * float(wpercent)))
-        logo = logo.resize((200, hsize), Image.Resampling.LANCZOS)
+        logo = logo.resize((100, hsize), Image.Resampling.LANCZOS)
         st.image(logo, use_container_width=False)
 
 
@@ -453,5 +453,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
