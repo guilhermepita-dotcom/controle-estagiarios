@@ -250,7 +250,7 @@ def exibir_logo():
         logo = Image.open(LOGO_FILE)
         wpercent = (400 / float(logo.size[0]))
         hsize = int((float(logo.size[1]) * float(wpercent)))
-        logo = logo.resize((400, hsize), Image.Resampling.LANCZOS)
+        logo = logo.resize((200, hsize), Image.Resampling.LANCZOS)
         st.image(logo, use_container_width=False)
 
 
@@ -318,10 +318,11 @@ def main():
             st.dataframe(df_view.style.apply(highlight_ultimo_ano, axis=1), use_container_width=True)
 
             st.download_button(
-                "📥 Exportar Excel",
-                exportar_para_excel_bytes(df_view),
-                file_name="estagiarios_export.xlsx"
-            )
+    label="📥 Exportar Excel",
+    data=exportar_para_excel_bytes(df_view),
+    file_name="estagiarios_export.xlsx",
+    key="download_dashboard"
+)
 
     # ==========================
     # Cadastro/Editar
@@ -443,11 +444,13 @@ def main():
         df_export = list_estagiarios_df()
         if not df_export.empty:
             st.download_button(
-                "📥 Exportar Excel",
-                exportar_para_excel_bytes(df_export),
-                file_name="estagiarios_export.xlsx"
-            )
+    label="📥 Exportar Excel",
+    data=exportar_para_excel_bytes(df_export),
+    file_name="estagiarios_export.xlsx",
+    key="download_io"
+)
 
 
 if __name__ == "__main__":
     main()
+
