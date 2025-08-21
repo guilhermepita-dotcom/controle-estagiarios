@@ -131,7 +131,6 @@ def set_config(key: str, value: str):
             (key, value),
         )
 
-
 # ==========================
 # Funções Estagiários
 # ==========================
@@ -141,9 +140,12 @@ def list_estagiarios_df() -> pd.DataFrame:
             "SELECT id, nome, universidade, data_admissao, data_ult_renovacao, ultimo_ano, obs, data_vencimento FROM estagiarios ORDER BY date(data_vencimento) ASC",
             conn
         )
+        # Colunas de data
         for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
             df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
+        # Último ano automático
         df["ultimo_ano"] = df["data_admissao"].apply(lambda d: "SIM" if d and date.today().year == d.year + 2 else "NÃO")
+        # Formato dd.mm.yyyy
         for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
             df[col] = df[col].apply(lambda x: x.strftime("%d.%m.%Y") if pd.notnull(x) else "")
     return df
@@ -153,32 +155,37 @@ def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: 
                       ultimo_ano: bool, obs: str, data_venc: date):
     with get_conn() as conn:
         c = conn.cursor()
-        c.execute("""
+        c.execute(
+            """
             INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, ultimo_ano, obs, data_vencimento)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (nome.strip(), universidade.strip(), str(data_adm),
-              str(data_renov) if data_renov else None, 1 if ultimo_ano else 0,
-              obs.strip() if obs else "", str(data_venc)))
+            """,
+            (nome.strip(), universidade.strip(), str(data_adm),
+             str(data_renov) if data_renov else None, 1 if ultimo_ano else 0,
+             obs.strip() if obs else "", str(data_venc))
+        )
 
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date,
                       data_renov: Optional[date], ultimo_ano: bool, obs: str, data_venc: date):
     with get_conn() as conn:
         c = conn.cursor()
-        c.execute("""
+        c.execute(
+            """
             UPDATE estagiarios
             SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, ultimo_ano=?, obs=?, data_vencimento=?
             WHERE id=?
-        """, (nome.strip(), universidade.strip(), str(data_adm),
-              str(data_renov) if data_renov else None, 1 if ultimo_ano else 0,
-              obs.strip() if obs else "", str(data_venc), int(est_id)))
+            """,
+            (nome.strip(), universidade.strip(), str(data_adm),
+             str(data_renov) if data_renov else None, 1 if ultimo_ano else 0,
+             obs.strip() if obs else "", str(data_venc), int(est_id))
+        )
 
 
 def delete_estagiario(est_id: int):
     with get_conn() as conn:
         c = conn.cursor()
         c.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
-
 
 # ==========================
 # Funções Regras e Status
@@ -241,8 +248,9 @@ def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
         data_bytes = f.read()
     os.remove(path_temp)
     return data_bytes
-
-
+# ==========================
+# Funções Auxiliares UI
+# ==========================
 def highlight_ultimo_ano(row):
     styles = [''] * len(row)
     if 'ultimo_ano' in row.index and row['ultimo_ano'] == "SIM":
@@ -252,38 +260,28 @@ def highlight_ultimo_ano(row):
 
 
 # ==========================
-# Inicializar session_state
-# ==========================
-if "est_selecionado" not in st.session_state:
-    st.session_state.est_selecionado = None
-
-
-# ==========================
 # Main App
 # ==========================
 def main():
     init_db()
 
-    # Cabeçalho com logo
-    col_logo, col_title = st.columns([1, 10])
-    with col_logo:
-        if os.path.exists(LOGO_FILE):
-            logo = Image.open(LOGO_FILE)
-            basewidth = 200
-            wpercent = (basewidth / float(logo.size[0]))
-            hsize = int(float(logo.size[1]) * wpercent)
-            logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
-            st.image(logo, use_container_width=True)
-    with col_title:
-        st.markdown(
-            "<h2 style='text-align: left;'>📋 Controle de Contratos de Estagiários</h2>"
-            "<p style='text-align: left; font-size:18px;'>Cadastro, Renovação e Acompanhamento de Vencimentos</p>",
-            unsafe_allow_html=True
-        )
+if os.path.exists(LOGO_FILE):
+    logo = Image.open(LOGO_FILE)
+    basewidth = 500
+    wpercent = (basewidth / float(logo.size[0]))
+    hsize = int((float(logo.size[1]) * float(wpercent)))
+    logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
+    st.image(logo, use_container_width=True)
+
+    st.markdown(
+        "<h2 style='text-align: center;'>📋 Controle de Contratos de Estagiários</h2>"
+        "<p style='text-align: center; font-size:18px;'>Cadastro, Renovação e Acompanhamento de Vencimentos</p>",
+        unsafe_allow_html=True
+    )
 
     proximos_dias = int(get_config("proximos_dias", str(DEFAULT_PROXIMOS_DIAS)))
     proximos_dias = st.sidebar.number_input(
-        "Janela 'Venc.Proximo' (dias)", min_value=1, max_value=120, value=proximos_dias, step=1, key="input_prox_dias"
+        "Janela 'Venc.Proximo' (dias)", min_value=1, max_value=120, value=proximos_dias, step=1
     )
     set_config("proximos_dias", str(proximos_dias))
 
@@ -316,8 +314,8 @@ def main():
 
             st.divider()
             st.subheader("Consulta rápida")
-            filtro_status = st.multiselect("Filtrar status", ["OK", "Venc.Proximo", "Vencido"], default=[], key="filtro_status")
-            filtro_nome = st.text_input("Buscar por Nome do Estagiário", key="filtro_nome")
+            filtro_status = st.multiselect("Filtrar status", ["OK", "Venc.Proximo", "Vencido"], default=[])
+            filtro_nome = st.text_input("Buscar por Nome do Estagiário")
 
             df_view = df.copy()
             if filtro_status:
@@ -337,93 +335,79 @@ def main():
     # ==========================
     # Cadastro/Editar
     # ==========================
- # ==========================
-# Cadastro/Editar
-# ==========================
-with tab_cad:
-    st.subheader("Cadastro/Editar Estagiário")
+    with tab_cad:
+        st.subheader("Cadastro/Editar Estagiário")
 
-    df_estagiarios = list_estagiarios_df()
-    nomes_estagiarios = df_estagiarios["nome"].tolist()
+        df_estagiarios = list_estagiarios_df()
+        nomes_estagiarios = df_estagiarios["nome"].tolist()
 
-    # Inicializar session_state para est_selecionado se não existir
-    if "est_selecionado" not in st.session_state:
-        st.session_state.est_selecionado = None
+        busca = st.text_input("Buscar Estagiário pelo nome")
+        est_selecionado = None
+        if busca.strip():
+            resultados = [nome for nome in nomes_estagiarios if busca.strip().lower() in nome.lower()]
+            if resultados:
+                est_nome_selecionado = st.selectbox("Selecionar Estagiário", resultados)
+                est_selecionado = df_estagiarios[df_estagiarios["nome"] == est_nome_selecionado].iloc[0]
+            else:
+                st.info("Nenhum estagiário encontrado")
 
-    busca = st.text_input("Buscar Estagiário pelo nome", key="busca_nome")
-    est_selecionado = None
-    if busca.strip():
-        resultados = [nome for nome in nomes_estagiarios if busca.strip().lower() in nome.lower()]
-        if resultados:
-            est_nome_selecionado = st.selectbox("Selecionar Estagiário", resultados, key="select_est")
-            est_selecionado = df_estagiarios[df_estagiarios["nome"] == est_nome_selecionado].iloc[0]
-            st.session_state.est_selecionado = est_selecionado
-        else:
-            st.info("Nenhum estagiário encontrado")
-    elif st.session_state.est_selecionado is not None:
-        est_selecionado = st.session_state.est_selecionado
+        # Valores default
+        nome_default = est_selecionado["nome"] if est_selecionado is not None else ""
+        universidade_default = est_selecionado["universidade"] if est_selecionado is not None else universidades_padrao[0]
+        data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True).date() if est_selecionado is not None else date.today()
+        data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True).date() if est_selecionado is not None else date.today()
+        obs_default = est_selecionado["obs"] if est_selecionado is not None else ""
 
-    # Valores default
-    nome_default = est_selecionado["nome"] if est_selecionado is not None else ""
-    universidade_default = est_selecionado["universidade"] if est_selecionado is not None else universidades_padrao[0]
-    data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True).date() if est_selecionado is not None else date.today()
-    data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True).date() if est_selecionado is not None else date.today()
-    obs_default = est_selecionado["obs"] if est_selecionado is not None else ""
-
-    with st.form("form_cadastro", clear_on_submit=False):
-        nome = st.text_input("Nome do Estagiário", value=nome_default, key="form_nome")
-        universidade = st.selectbox(
-            "Universidade",
-            universidades_padrao,
-            index=universidades_padrao.index(universidade_default) if universidade_default in universidades_padrao else 0,
-            key="form_uni"
-        )
-        if universidade == "Outra (cadastrar manualmente)":
-            universidade = st.text_input(
-                "Digite a Universidade",
-                value=universidade_default if universidade_default not in universidades_padrao else "",
-                key="form_uni_manual"
+        with st.form("form_cadastro"):
+            nome = st.text_input("Nome do Estagiário", value=nome_default)
+            universidade = st.selectbox(
+                "Universidade",
+                universidades_padrao,
+                index=universidades_padrao.index(universidade_default) if universidade_default in universidades_padrao else 0
             )
+            if universidade == "Outra (cadastrar manualmente)":
+                universidade = st.text_input(
+                    "Digite a Universidade",
+                    value=universidade_default if universidade_default not in universidades_padrao else ""
+                )
 
-        data_adm = st.date_input("Data de Admissão", value=data_adm_default, key="form_data_adm")
-        data_renov = st.date_input("Data Últ. Renovação", value=data_renov_default, key="form_data_renov")
-        obs = st.text_area("Observações", value=obs_default, height=100, key="form_obs")
+            data_adm = st.date_input("Data de Admissão", value=data_adm_default)
+            data_renov = st.date_input("Data Últ. Renovação", value=data_renov_default)
+            obs = st.text_area("Observações", value=obs_default, height=100)
 
-        col1, col2, col3 = st.columns([1, 1, 1])
-        submit = col1.form_submit_button("💾 Salvar")
-        delete = col2.form_submit_button("🗑️ Excluir")
-        novo = col3.form_submit_button("➕ Novo")
+            col1, col2, col3 = st.columns([1,1,1])
+            submit = col1.form_submit_button("💾 Salvar")
+            delete = col2.form_submit_button("🗑️ Excluir")
+            novo = col3.form_submit_button("➕ Novo")
 
-        # Salvar
-        if submit:
-            if not nome.strip() or not universidade.strip() or not data_adm:
-                st.warning("Preencha todos os campos obrigatórios.")
-            else:
-                data_venc = calcular_vencimento(universidade, data_adm, data_renov)
-                ultimo_ano = date.today().year == data_adm.year + 2
-                if est_selecionado is None:
-                    insert_estagiario(nome, universidade, data_adm, data_renov, ultimo_ano, obs, data_venc)
-                    st.success(f"Estagiário {nome} cadastrado com sucesso!")
-                    st.session_state.est_selecionado = None
+            # Salvar
+            if submit:
+                if not nome.strip() or not universidade.strip() or not data_adm:
+                    st.warning("Preencha todos os campos obrigatórios.")
                 else:
-                    update_estagiario(est_selecionado["id"], nome, universidade, data_adm, data_renov, ultimo_ano, obs, data_venc)
-                    st.success(f"Estagiário {nome} atualizado com sucesso!")
+                    data_venc = calcular_vencimento(universidade, data_adm, data_renov)
+                    ultimo_ano = date.today().year == data_adm.year + 2
+                    if est_selecionado is None:
+                        insert_estagiario(nome, universidade, data_adm, data_renov, ultimo_ano, obs, data_venc)
+                        st.success(f"Estagiário {nome} cadastrado com sucesso!")
+                    else:
+                        update_estagiario(est_selecionado["id"], nome, universidade, data_adm, data_renov, ultimo_ano, obs, data_venc)
+                        st.success(f"Estagiário {nome} atualizado com sucesso!")
 
-        # Excluir
-        if delete:
-            if est_selecionado is None:
-                st.warning("Selecione um estagiário para excluir.")
-            else:
-                confirm = st.checkbox(f"Confirme exclusão do estagiário {est_selecionado['nome']}", key="confirm_delete")
-                if confirm:
-                    delete_estagiario(est_selecionado["id"])
-                    st.success(f"🗑️ Estagiário {est_selecionado['nome']} excluído com sucesso!")
-                    st.session_state.est_selecionado = None
+            # Excluir
+            if delete:
+                if est_selecionado is None:
+                    st.warning("Selecione um estagiário para excluir.")
+                else:
+                    confirm = st.checkbox(f"Confirme exclusão do estagiário {est_selecionado['nome']}")
+                    if confirm:
+                        delete_estagiario(est_selecionado["id"])
+                        st.success(f"🗑️ Estagiário {est_selecionado['nome']} excluído com sucesso!")
 
-        # Novo: limpa session_state sem rerun
-        if novo:
-            st.session_state.est_selecionado = None
-            st.experimental_rerun()
+            # Novo
+            if novo:
+                est_selecionado = None
+                st.experimental_rerun()
 
     # ==========================
     # Regras
@@ -431,7 +415,7 @@ with tab_cad:
     with tab_regras:
         st.subheader("Regras por Universidade (meses de contrato)")
         df_regras = list_regras()
-        st.dataframe(df_regras, use_container_width=True, key="df_regras")
+        st.dataframe(df_regras, use_container_width=True)
         with st.form("form_regras"):
             keyword = st.text_input("Palavra-chave da Universidade").upper()
             meses = st.number_input("Meses de contrato", min_value=1, max_value=60, value=6)
@@ -440,13 +424,12 @@ with tab_cad:
                 add_regra(keyword, meses)
                 st.success(f"Regra '{keyword}' adicionada/atualizada com sucesso!")
 
-
     # ==========================
     # Import / Export
     # ==========================
     with tab_io:
         st.subheader("Importar / Exportar")
-        arquivo = st.file_uploader("Importar Excel", type=["xlsx"], key="import_excel")
+        arquivo = st.file_uploader("Importar Excel", type=["xlsx"])
         if arquivo:
             df_import = pd.read_excel(arquivo)
             count = 0
@@ -469,13 +452,9 @@ with tab_cad:
         st.download_button(
             "📥 Exportar Excel",
             exportar_para_excel_bytes(df_export),
-            file_name="estagiarios_export.xlsx",
-            key="download_io"
+            file_name="estagiarios_export.xlsx"
         )
 
 
 if __name__ == "__main__":
     main()
-
-
-
