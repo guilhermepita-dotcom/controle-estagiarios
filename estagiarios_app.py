@@ -337,7 +337,10 @@ def main():
     # ==========================
     # Cadastro/Editar
     # ==========================
- with tab_cad:
+ # ==========================
+# Cadastro/Editar
+# ==========================
+with tab_cad:
     st.subheader("Cadastro/Editar Estagiário")
 
     df_estagiarios = list_estagiarios_df()
@@ -349,17 +352,12 @@ def main():
 
     busca = st.text_input("Buscar Estagiário pelo nome", key="busca_nome")
     est_selecionado = None
-
     if busca.strip():
         resultados = [nome for nome in nomes_estagiarios if busca.strip().lower() in nome.lower()]
         if resultados:
             est_nome_selecionado = st.selectbox("Selecionar Estagiário", resultados, key="select_est")
-            est_selecionado = df_estagiarios[df_estagiarios["nome"] == est_nome_selecionado]
-            if not est_selecionado.empty:
-                est_selecionado = est_selecionado.iloc[0]
-                st.session_state.est_selecionado = est_selecionado
-            else:
-                est_selecionado = None
+            est_selecionado = df_estagiarios[df_estagiarios["nome"] == est_nome_selecionado].iloc[0]
+            st.session_state.est_selecionado = est_selecionado
         else:
             st.info("Nenhum estagiário encontrado")
     elif st.session_state.est_selecionado is not None:
@@ -422,7 +420,7 @@ def main():
                     st.success(f"🗑️ Estagiário {est_selecionado['nome']} excluído com sucesso!")
                     st.session_state.est_selecionado = None
 
-        # Novo: limpa session_state e reinicia o form
+        # Novo: limpa session_state sem rerun
         if novo:
             st.session_state.est_selecionado = None
             st.experimental_rerun()
@@ -478,5 +476,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
