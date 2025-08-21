@@ -334,8 +334,7 @@ def main():
     # ==========================
     # Cadastro/Editar
     # ==========================
-
-with tab_cad:
+    with tab_cad:
     st.subheader("Cadastro/Editar Estagiário")
 
     df_estagiarios = list_estagiarios_df()
@@ -472,4 +471,5 @@ with tab_cad:
 
 if __name__ == "__main__":
     main()
+
 
