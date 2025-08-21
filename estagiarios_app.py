@@ -265,14 +265,13 @@ def highlight_ultimo_ano(row):
 def main():
     init_db()
 
-    # Logo centralizado
-    if os.path.exists(LOGO_FILE):
-        logo = Image.open(LOGO_FILE)
-        basewidth = 500
-        wpercent = (basewidth / float(logo.size[0]))
-        hsize = int((float(logo.size[1]) * float(wpercent)))
-        logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
-        st.image(logo, use_column_width=False)
+if os.path.exists(LOGO_FILE):
+    logo = Image.open(LOGO_FILE)
+    basewidth = 500
+    wpercent = (basewidth / float(logo.size[0]))
+    hsize = int((float(logo.size[1]) * float(wpercent)))
+    logo = logo.resize((basewidth, hsize), Image.Resampling.LANCZOS)
+    st.image(logo, use_container_width=True)
 
     st.markdown(
         "<h2 style='text-align: center;'>📋 Controle de Contratos de Estagiários</h2>"
