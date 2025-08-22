@@ -168,7 +168,7 @@ def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date,
 def delete_estagiario(est_id: int):
     with get_conn() as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM estagiarios WHERE id=?", (est_id,))
+        c.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
 
 def add_regra(keyword: str, meses: int):
     with get_conn() as conn:
@@ -178,12 +178,12 @@ def add_regra(keyword: str, meses: int):
 def update_regra(regra_id: int, keyword: str, meses: int):
     with get_conn() as conn:
         c = conn.cursor()
-        c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, regra_id))
+        c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
 
 def delete_regra(regra_id: int):
     with get_conn() as conn:
         c = conn.cursor()
-        c.execute("DELETE FROM regras WHERE id=?", (regra_id,))
+        c.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
@@ -486,7 +486,8 @@ def main():
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
             if col1_conf.button("SIM, EXCLUIR REGRA", type="primary"):
-                delete_regra(st.session_state.confirm_delete_rule['id'])
+                # CORREÇÃO: Converter o ID para inteiro antes de deletar
+                delete_regra(int(st.session_state.confirm_delete_rule['id']))
                 st.session_state.message = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
                 st.rerun()
@@ -494,7 +495,6 @@ def main():
                 st.session_state.confirm_delete_rule = None
                 st.rerun()
         
-        # SÓ MOSTRA OS FORMULÁRIOS SE NENHUMA CONFIRMAÇÃO ESTIVER ATIVA
         else:
             df_regras = list_regras()
             st.dataframe(df_regras, use_container_width=True, hide_index=True)
