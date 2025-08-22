@@ -565,4 +565,40 @@ def main():
                 else:
                     st.warning("Nenhuma regra cadastrada para editar.")
 
-    #
+    # ==========================
+    # Import / Export
+    # ==========================
+    with tab_io:
+        st.subheader("Importar / Exportar Dados")
+        st.info("Para importar, o arquivo Excel deve conter as colunas: 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao' (opcional), 'obs' (opcional).")
+        arquivo = st.file_uploader("Importar de um arquivo Excel (.xlsx)", type=["xlsx"])
+        if arquivo:
+            df_import = pd.read_excel(arquivo)
+            count = 0
+            with st.spinner("Importando dados..."):
+                for _, row in df_import.iterrows():
+                    try:
+                        nome = str(row.get("nome","")).strip().upper()
+                        universidade = str(row.get("universidade","")).strip().upper()
+                        data_adm = pd.to_datetime(row.get("data_admissao")).date()
+                        data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
+                        obs = str(row.get("obs","")).strip().upper()
+                        if nome and universidade and data_adm:
+                            data_venc = calcular_vencimento(universidade, data_adm, data_renov)
+                            insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
+                            count += 1
+                    except Exception as e:
+                        st.warning(f"Erro ao importar a linha com nome '{nome}': {e}")
+                        continue
+            st.success(f"{count} estagiários importados com sucesso!")
+        st.divider()
+        df_export = list_estagiarios_df()
+        st.download_button(
+            "📥 Exportar Todos os Dados para Excel",
+            exportar_para_excel_bytes(df_export),
+            file_name="estagiarios_export_completo.xlsx"
+        )
+
+
+if __name__ == "__main__":
+    main()
