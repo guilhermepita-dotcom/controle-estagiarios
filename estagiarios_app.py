@@ -378,7 +378,7 @@ def main():
             nome_filtrado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
             if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
 
-        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário para Editar", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
+        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
         st.markdown("---")
 
         if nome_selecionado:
@@ -475,16 +475,13 @@ def main():
         st.subheader("Regras de Duração do Contrato por Universidade")
         st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
 
-        # Inicialização dos estados da sessão para a aba de regras
         if 'message' not in st.session_state: st.session_state.message = None
         if 'confirm_delete_rule' not in st.session_state: st.session_state.confirm_delete_rule = None
 
-        # Exibe mensagens de sucesso/erro
         if st.session_state.message:
             show_message(st.session_state.message)
             st.session_state.message = None
 
-        # Lógica de confirmação de exclusão da REGRA
         if st.session_state.confirm_delete_rule:
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
@@ -496,50 +493,51 @@ def main():
             if col2_conf.button("NÃO, CANCELAR EXCLUSÃO"):
                 st.session_state.confirm_delete_rule = None
                 st.rerun()
-
-        df_regras = list_regras()
-        st.dataframe(df_regras, use_container_width=True, hide_index=True)
-        st.divider()
-
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            with st.form("form_add_regra"):
-                st.subheader("Adicionar Regra")
-                keyword = st.text_input("🔎 Palavra-chave").upper()
-                meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
-                add_button = st.form_submit_button("Adicionar")
-                if add_button and keyword.strip():
-                    add_regra(keyword, meses)
-                    st.session_state.message = {'text': f"Regra '{keyword}' adicionada!", 'type': 'success'}
-                    st.rerun()
-        with c2:
-            with st.form("form_edit_regra"):
-                st.subheader("Editar Regra")
-                if not df_regras.empty:
-                    id_para_editar = st.selectbox("Selecione o ID", options=df_regras['id'].tolist())
-                    regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
-                    novo_keyword = st.text_input("Novo nome", value=regra_selecionada['keyword']).upper()
-                    novos_meses = st.number_input("Novos meses", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
-                    update_button = st.form_submit_button("Salvar")
-                    if update_button and novo_keyword.strip():
-                        update_regra(id_para_editar, novo_keyword, novos_meses)
-                        st.session_state.message = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
-                        st.rerun()
-                else: st.info("Nenhuma regra para editar.")
         
-        with c3:
-            with st.form("form_delete_regra"):
-                st.subheader("Excluir Regra")
-                if not df_regras.empty:
-                    opcoes = {f"{r['id']} - {r['keyword']}": r['id'] for i, r in df_regras.iterrows()}
-                    regra_para_deletar_str = st.selectbox("Selecione a regra", options=opcoes.keys())
-                    delete_button = st.form_submit_button("🗑️ Excluir")
-                    if delete_button and regra_para_deletar_str:
-                        regra_id = opcoes[regra_para_deletar_str]
-                        keyword = regra_para_deletar_str.split(' - ')[1]
-                        st.session_state.confirm_delete_rule = {'id': regra_id, 'keyword': keyword}
+        # SÓ MOSTRA OS FORMULÁRIOS SE NENHUMA CONFIRMAÇÃO ESTIVER ATIVA
+        else:
+            df_regras = list_regras()
+            st.dataframe(df_regras, use_container_width=True, hide_index=True)
+            st.divider()
+
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                with st.form("form_add_regra"):
+                    st.subheader("Adicionar Regra")
+                    keyword = st.text_input("🔎 Palavra-chave").upper()
+                    meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
+                    add_button = st.form_submit_button("Adicionar")
+                    if add_button and keyword.strip():
+                        add_regra(keyword, meses)
+                        st.session_state.message = {'text': f"Regra '{keyword}' adicionada!", 'type': 'success'}
                         st.rerun()
-                else: st.info("Nenhuma regra para excluir.")
+            with c2:
+                with st.form("form_edit_regra"):
+                    st.subheader("Editar Regra")
+                    if not df_regras.empty:
+                        id_para_editar = st.selectbox("Selecione o ID", options=df_regras['id'].tolist())
+                        regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
+                        novo_keyword = st.text_input("Novo nome", value=regra_selecionada['keyword']).upper()
+                        novos_meses = st.number_input("Novos meses", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
+                        update_button = st.form_submit_button("Salvar")
+                        if update_button and novo_keyword.strip():
+                            update_regra(id_para_editar, novo_keyword, novos_meses)
+                            st.session_state.message = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
+                            st.rerun()
+                    else: st.info("Nenhuma regra para editar.")
+            
+            with c3:
+                with st.form("form_delete_regra"):
+                    st.subheader("Excluir Regra")
+                    if not df_regras.empty:
+                        opcoes = {f"{r['id']} - {r['keyword']}": r for i, r in df_regras.iterrows()}
+                        regra_para_deletar_str = st.selectbox("Selecione a regra", options=opcoes.keys())
+                        delete_button = st.form_submit_button("🗑️ Excluir")
+                        if delete_button and regra_para_deletar_str:
+                            regra_selecionada = opcoes[regra_para_deletar_str]
+                            st.session_state.confirm_delete_rule = {'id': regra_selecionada['id'], 'keyword': regra_selecionada['keyword']}
+                            st.rerun()
+                    else: st.info("Nenhuma regra para excluir.")
 
     with tab_io:
         st.subheader("Importar / Exportar Dados")
