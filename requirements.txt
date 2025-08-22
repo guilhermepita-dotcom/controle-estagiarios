@@ -3,4 +3,4 @@ pandas
 python-dateutil
 Pillow
 openpyxl
-SQLAlchemy
+streamlit-option-menu
