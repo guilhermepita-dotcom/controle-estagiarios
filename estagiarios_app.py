@@ -89,9 +89,10 @@ def load_custom_css():
             }
             
             .main > div { background-color: var(--background-color); }
-            
-            /* OCULTA A BARRA LATERAL PADRÃO */
-            [data-testid="stSidebar"] { display: none; }
+            [data-testid="stSidebar"] { 
+                background-color: var(--secondary-background-color); 
+                border-right: 1px solid #333;
+            }
             
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
             h1 { color: var(--primary-color) !important; }
@@ -112,7 +113,15 @@ def load_custom_css():
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
-            
+            .stButton > button[kind="primary"] {
+                background-color: #D9534F;
+                border-color: #D9534F;
+            }
+            .stButton > button[kind="primary"]:hover {
+                background-color: transparent;
+                color: #D9534F;
+            }
+
             [data-testid="stMetric"] {
                 background-color: var(--secondary-background-color);
                 border-radius: 10px;
@@ -127,12 +136,6 @@ def load_custom_css():
                 padding: 25px;
                 border: 1px solid #333;
             }
-            /* Estilo para o Expander do Admin */
-            [data-testid="stExpander"] {
-                background-color: var(--secondary-background-color);
-                border-radius: 8px;
-                border: 1px solid #333;
-            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -145,6 +148,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# (O restante das funções de backend permanece o mesmo)
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
@@ -181,9 +185,6 @@ def set_config(key: str, value: str):
     c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
     conn.commit()
 
-# ==========================
-# Funções de Lógica e CRUD
-# ==========================
 def list_regras() -> pd.DataFrame:
     df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
     return df
@@ -302,15 +303,32 @@ def main():
     load_custom_css()
     init_db()
 
-    c1, c2 = st.columns([1, 5], vertical_alignment="center")
-    with c1:
+    # --- NOVA ESTRUTURA: MENU NA BARRA LATERAL ---
+    with st.sidebar:
         if os.path.exists(LOGO_FILE):
-            st.image(LOGO_FILE, width=150)
-    with c2:
-        st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
-        st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
-    
-    with st.expander("🔑 Área Administrativa"):
+            st.image(LOGO_FILE, width=100)
+        st.markdown("<h1 style='font-size: 24px;'>Controle de Estagiários</h1>", unsafe_allow_html=True)
+        
+        selected = option_menu(
+            menu_title=None,
+            options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
+            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
+            menu_icon="cast",
+            default_index=0,
+            styles={
+                "container": {"padding": "5px !important", "background-color": "transparent"},
+                "icon": {"color": "#E2A144", "font-size": "20px"},
+                "nav-link": {"font-size": "16px", "text-align": "left", "margin":"0px", "--hover-color": "#444"},
+                "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
+            }
+        )
+        
+        st.divider()
+        proximos_dias_input = st.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
+        set_config("proximos_dias", str(proximos_dias_input))
+        st.divider()
+
+        st.title("Área Administrativa")
         if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
         admin_password = get_config("admin_password")
         
@@ -325,37 +343,21 @@ def main():
         
         if st.session_state.admin_logged_in:
             st.success("Acesso liberado!")
+            if st.button("Sair"):
+                st.session_state.admin_logged_in = False
+                st.rerun()
             st.subheader("Backup do Banco de Dados")
             if os.path.exists(DB_FILE):
                 with open(DB_FILE, "rb") as f:
                     db_bytes = f.read()
                 st.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
-            if st.button("Sair"):
-                st.session_state.admin_logged_in = False
-                st.rerun()
 
-    selected = option_menu(
-        menu_title=None,
-        options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
-        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
-        menu_icon="cast",
-        default_index=0,
-        orientation="horizontal",
-        styles={
-            "container": {"padding": "5px !important", "background-color": "#212121", "border-radius": "8px", "margin-top": "10px"},
-            "icon": {"color": "#E2A144", "font-size": "20px"},
-            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "--hover-color": "#333"},
-            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
-        }
-    )
-    
+    # --- CONTEÚDO PRINCIPAL ---
     if selected == "Dashboard":
-        c_dash1, c_dash2 = st.columns([3, 1])
-        with c_dash2:
-            proximos_dias_input = st.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
-            set_config("proximos_dias", str(proximos_dias_input))
-        
-        c_dash1.subheader("📊 Métricas Gerais")
+        st.title("📊 Dashboard")
+        st.divider()
+
+        st.subheader("Métricas Gerais")
         df = list_estagiarios_df()
         if df.empty:
             st.info("Nenhum estagiário cadastrado para exibir métricas.")
@@ -387,8 +389,9 @@ def main():
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
     if selected == "Cadastro/Editar":
-        st.subheader("Gerenciar Cadastro de Estagiário")
-        
+        st.title("📝 Gerenciar Cadastro de Estagiário")
+        st.divider()
+
         if 'form_mode' not in st.session_state: st.session_state.form_mode = None
         if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
         if 'message' not in st.session_state: st.session_state.message = None
@@ -502,7 +505,8 @@ def main():
                     st.rerun()
 
     if selected == "Regras":
-        st.subheader("Gerenciar Regras de Contrato")
+        st.title("⚙️ Gerenciar Regras de Contrato")
+        st.divider()
         st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
 
         if 'message_rule' not in st.session_state: st.session_state.message_rule = None
@@ -515,7 +519,7 @@ def main():
         if st.session_state.confirm_delete_rule:
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
-            if col1_conf.button("SIM, EXCLUIR REGRA"):
+            if col1_conf.button("SIM, EXCLUIR REGRA", type="primary"):
                 delete_regra(int(st.session_state.confirm_delete_rule['id']))
                 st.session_state.message_rule = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
@@ -565,7 +569,8 @@ def main():
                         st.form_submit_button("🗑️ Excluir", disabled=True)
 
     if selected == "Import/Export":
-        st.subheader("Importar / Exportar Dados")
+        st.title("📥 Importar / Exportar Dados")
+        st.divider()
         st.info("O arquivo Excel deve conter as colunas: 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao' (opcional), 'obs' (opcional).")
         arquivo = st.file_uploader("Importar de um arquivo Excel (.xlsx)", type=["xlsx"])
         if arquivo:
