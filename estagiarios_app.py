@@ -262,7 +262,6 @@ def highlight_status_and_year(row):
         
     return styles
 
-# NOVO: Função para exibir mensagens
 def show_message(message: Dict[str, Any]):
     if message['type'] == 'success':
         st.success(message['text'])
@@ -354,32 +353,28 @@ def main():
                 )
 
     # ==========================
-    # Cadastro/Editar (SEÇÃO TOTALMENTE REFEITA)
+    # Cadastro/Editar (SEÇÃO CORRIGIDA)
     # ==========================
     with tab_cad:
         st.subheader("Gerenciar Cadastro de Estagiário")
 
-        # Inicialização dos estados da sessão
         if 'form_mode' not in st.session_state:
-            st.session_state.form_mode = None  # Pode ser 'new', 'edit' ou None
+            st.session_state.form_mode = None
         if 'est_selecionado_id' not in st.session_state:
             st.session_state.est_selecionado_id = None
         if 'message' not in st.session_state:
             st.session_state.message = None
 
-        # Exibe e limpa a mensagem de estado
         if st.session_state.message:
             show_message(st.session_state.message)
             st.session_state.message = None
         
-        # --- Ações Principais no Topo ---
         c1, c2, c3 = st.columns([1, 2, 1])
         if c1.button("➕ Novo Cadastro"):
             st.session_state.form_mode = 'new'
             st.session_state.est_selecionado_id = None
             st.rerun()
 
-        # --- Busca de Estagiário ---
         df_estagiarios = list_estagiarios_df()
         nomes_estagiarios = [""] + df_estagiarios["nome"].tolist()
         
@@ -397,7 +392,6 @@ def main():
         )
         st.markdown("---")
 
-        # Lógica para atualizar o modo com base na busca
         if nome_selecionado:
             id_novo = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
             if st.session_state.est_selecionado_id != id_novo:
@@ -409,8 +403,6 @@ def main():
              st.session_state.form_mode = None
              st.rerun()
 
-
-        # --- Painel de Formulário Condicional ---
         if st.session_state.form_mode in ['new', 'edit']:
             
             est_selecionado = None
@@ -419,19 +411,19 @@ def main():
                 if not resultado.empty:
                     est_selecionado = resultado.iloc[0]
 
-            # Define os valores padrão para o formulário
-            nome_default = est_selecionado["nome"] if est_selecionado else ""
-            uni_default_val = est_selecionado["universidade"] if est_selecionado else ""
-            data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True, errors='coerce').date() if est_selecionado and est_selecionado["data_admissao"] else None
-            data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True, errors='coerce').date() if est_selecionado and est_selecionado["data_ult_renovacao"] else None
-            obs_default = est_selecionado["obs"] if est_selecionado else ""
+            # CORREÇÃO DO ERRO: usar "is not None" para checar a Series do pandas
+            nome_default = est_selecionado["nome"] if est_selecionado is not None else ""
+            uni_default_val = est_selecionado["universidade"] if est_selecionado is not None else ""
+            data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_admissao"] else None
+            data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_ult_renovacao"] else None
+            obs_default = est_selecionado["obs"] if est_selecionado is not None else ""
             
             form_key_suffix = str(st.session_state.est_selecionado_id) if st.session_state.est_selecionado_id else "new"
 
             with st.form("form_cadastro", clear_on_submit=False):
                 if st.session_state.form_mode == 'new':
                     st.subheader("Novo Cadastro de Estagiário")
-                else:
+                elif est_selecionado is not None:
                     st.subheader(f"Editando: {nome_default}")
                 
                 nome = st.text_input("Nome do Estagiário*", value=nome_default, key=f"nome_{form_key_suffix}")
@@ -462,25 +454,30 @@ def main():
                 col1_form, col2_form, col3_form, col4_form = st.columns([2,2,2,2])
                 submit = col1_form.form_submit_button("💾 Salvar")
                 delete = col2_form.form_submit_button("🗑️ Excluir", disabled=(st.session_state.form_mode == 'new'))
-                limpar = col4_form.form_submit_button("🧹 Limpar / Cancelar")
+                limpar = col4_form.form_submit_button("🧹 Cancelar")
 
                 if submit:
                     if not nome.strip() or not universidade_final.strip() or not data_adm:
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     else:
-                        data_venc = calcular_vencimento(universidade_final, data_adm, data_renov)
+                        # CONVERSÃO PARA MAIÚSCULAS
+                        nome_upper = nome.strip().upper()
+                        universidade_upper = universidade_final.strip().upper()
+                        obs_upper = obs.strip().upper()
+                        
+                        data_venc = calcular_vencimento(universidade_upper, data_adm, data_renov)
                         if est_selecionado is None:
-                            insert_estagiario(nome, universidade_final, data_adm, data_renov, obs, data_venc)
-                            st.session_state.message = {'text': f"Estagiário {nome} cadastrado com sucesso!", 'type': 'success'}
+                            insert_estagiario(nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
+                            st.session_state.message = {'text': f"Estagiário {nome_upper} cadastrado com sucesso!", 'type': 'success'}
                         else:
-                            update_estagiario(est_selecionado["id"], nome, universidade_final, data_adm, data_renov, obs, data_venc)
-                            st.session_state.message = {'text': f"Estagiário {nome} atualizado com sucesso!", 'type': 'success'}
+                            update_estagiario(est_selecionado["id"], nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
+                            st.session_state.message = {'text': f"Estagiário {nome_upper} atualizado com sucesso!", 'type': 'success'}
                         
                         st.session_state.form_mode = None
                         st.session_state.est_selecionado_id = None
                     st.rerun()
 
-                if delete and est_selecionado:
+                if delete and est_selecionado is not None:
                     delete_estagiario(est_selecionado["id"])
                     st.session_state.message = {'text': f"🗑️ Estagiário {est_selecionado['nome']} excluído com sucesso!", 'type': 'success'}
                     st.session_state.form_mode = None
@@ -540,11 +537,11 @@ def main():
             with st.spinner("Importando dados..."):
                 for _, row in df_import.iterrows():
                     try:
-                        nome = str(row.get("nome","")).strip()
-                        universidade = str(row.get("universidade","")).strip()
+                        nome = str(row.get("nome","")).strip().upper()
+                        universidade = str(row.get("universidade","")).strip().upper()
                         data_adm = pd.to_datetime(row.get("data_admissao")).date()
                         data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
-                        obs = str(row.get("obs","")).strip()
+                        obs = str(row.get("obs","")).strip().upper()
                         if nome and universidade and data_adm:
                             data_venc = calcular_vencimento(universidade, data_adm, data_renov)
                             insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
