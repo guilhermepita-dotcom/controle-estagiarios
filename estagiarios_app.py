@@ -282,23 +282,23 @@ def highlight_status_and_year(row):
 def main():
     init_db()
 
-    # --- NOVO: Layout do Cabeçalho Centralizado ---
-    if os.path.exists(LOGO_FILE):
-        # Colunas para centralizar a logo
-        col1, col2, col3 = st.columns([2, 1, 2])
-        with col2:
-            logo = Image.open(LOGO_FILE)
-            st.image(logo, width=200) # AUMENTADO O TAMANHO DA LOGO
+    # --- NOVO: Layout do Cabeçalho com Logo à Esquerda ---
+    col1, col2 = st.columns([1, 4], vertical_alignment="center")
 
-    # Títulos centralizados usando st.markdown com HTML
-    st.markdown(
-        "<h1 style='text-align: center;'>Controle de Contratos de Estagiários</h1>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        "<p style='text-align: center; font-size:18px;'>Cadastro, Renovação e Acompanhamento de Vencimentos</p>",
-        unsafe_allow_html=True
-    )
+    with col1:
+        if os.path.exists(LOGO_FILE):
+            logo = Image.open(LOGO_FILE)
+            st.image(logo, width=200)
+
+    with col2:
+        st.markdown(
+            "<h1 style='text-align: left;'>Controle de Contratos de Estagiários</h1>",
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            "<p style='text-align: left; font-size:18px;'>Cadastro, Renovação e Acompanhamento de Vencimentos</p>",
+            unsafe_allow_html=True
+        )
     
     st.divider()
 
@@ -347,10 +347,8 @@ def main():
             if filtro_nome.strip():
                 df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
 
-            # Adicionando a coluna de status ao dataframe para visualização e exportação
             df_view['status'] = df['status']
             
-            # NOVO: hide_index=True para ocultar a primeira coluna
             st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True, hide_index=True)
 
             st.download_button(
@@ -405,7 +403,6 @@ def main():
         data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_ult_renovacao"] else None
         obs_default = est_selecionado["obs"] if est_selecionado is not None else ""
         
-        # NOVO: Chave dinâmica para forçar o recarregamento dos widgets
         form_key_suffix = str(st.session_state.est_selecionado_id) if st.session_state.est_selecionado_id else "new"
 
         with st.form("form_cadastro", clear_on_submit=False):
