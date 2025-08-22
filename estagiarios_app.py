@@ -508,9 +508,9 @@ def main():
                     st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
                     st.rerun()
     
-with tab_regras:
+    with tab_regras:
         st.subheader("Regras de Duração do Contrato por Universidade")
-        st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses). Se uma universidade não estiver listada, o padrão de 6 meses será usado.")
+        st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
 
         if 'message_rule' not in st.session_state: st.session_state.message_rule = None
         if 'confirm_delete_rule' not in st.session_state: st.session_state.confirm_delete_rule = None
@@ -537,7 +537,6 @@ with tab_regras:
             if df_regras.empty:
                 st.info("Nenhuma regra cadastrada. Universidades sem regra específica usarão o padrão de 6 meses.")
             else:
-                # Renomeia a coluna para exibição no st.table
                 df_regras_display = df_regras.rename(columns={"id": "ID", "keyword": "Universidade", "meses": "Meses"})
                 st.table(df_regras_display)
 
@@ -546,7 +545,7 @@ with tab_regras:
             c1, c2, c3 = st.columns(3)
             with c1:
                 with st.form("form_add_regra"):
-                    st.subheader("Adicionar Regra")
+                    st.subheader("Adicionar/Atualizar Regra")
                     universidade_selecionada = st.selectbox("Universidade", options=universidades_padrao, index=None, placeholder="Selecione...")
                     keyword_final = ""
                     if universidade_selecionada == "Outra (cadastrar manualmente)":
@@ -555,27 +554,14 @@ with tab_regras:
                         keyword_final = universidade_selecionada.upper()
                     
                     meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
-                    add_button = st.form_submit_button("Adicionar")
+                    add_button = st.form_submit_button("Salvar")
                     if add_button and keyword_final.strip():
                         add_regra(keyword_final, meses)
-                        st.session_state.message_rule = {'text': f"Regra para '{keyword_final}' adicionada/atualizada!", 'type': 'success'}
+                        st.session_state.message_rule = {'text': f"Regra para '{keyword_final}' salva!", 'type': 'success'}
                         st.rerun()
             with c2:
-                with st.form("form_edit_regra"):
-                    st.subheader("Editar Regra")
-                    if not df_regras.empty:
-                        id_para_editar = st.selectbox("Selecione o ID", options=df_regras['id'].tolist())
-                        regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
-                        novo_keyword = st.text_input("Universidade", value=regra_selecionada['keyword']).upper()
-                        novos_meses = st.number_input("Novos meses", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
-                        update_button = st.form_submit_button("Salvar Alterações")
-                        if update_button and novo_keyword.strip():
-                            update_regra(id_para_editar, novo_keyword, novos_meses)
-                            st.session_state.message_rule = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
-                            st.rerun()
-                    else: 
-                        st.info("Nenhuma regra para editar.")
-                        st.form_submit_button("Salvar Alterações", disabled=True)
+                st.subheader("Editar Regra")
+                st.info("Para editar, basta adicionar uma nova regra para a mesma universidade com um valor de meses diferente.")
             
             with c3:
                 with st.form("form_delete_regra"):
@@ -619,4 +605,3 @@ with tab_regras:
 
 if __name__ == "__main__":
     main()
-
