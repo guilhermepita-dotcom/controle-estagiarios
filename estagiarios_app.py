@@ -21,7 +21,7 @@ DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
 
 # Senha do admin para backup (pode ser colocada nos Secrets depois)
-ADMIN_PASSWORD = "change_this_password" 
+ADMIN_PASSWORD = "Smb123456" 
 
 universidades_padrao = [
     "Anhanguera - Instituição de Ensino Anhanguera",
@@ -464,3 +464,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
