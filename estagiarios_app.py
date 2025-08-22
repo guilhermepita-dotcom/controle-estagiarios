@@ -111,7 +111,7 @@ def load_custom_css():
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
             .stButton > button[kind="primary"] {
-                background-color: #D9534F;
+                background-color: #FFFFFF;
                 border-color: #D9534F;
             }
             .stButton > button[kind="primary"]:hover {
@@ -598,3 +598,4 @@ def main():
 if __name__ == "__main__":
     main()
     
+
