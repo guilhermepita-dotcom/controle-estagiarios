@@ -85,11 +85,15 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
     
-    c.execute("SELECT COUNT(*) FROM regras")
-    count = c.fetchone()[0]
-    if count == 0:
+    # VERIFICA SE AS REGRAS PADRÃO JÁ FORAM INSERIDAS ALGUMA VEZ
+    c.execute("SELECT value FROM config WHERE key='regras_iniciadas'")
+    regras_iniciadas = c.fetchone()
+    
+    if not regras_iniciadas:
         for kw, meses in DEFAULT_REGRAS:
             c.execute("INSERT INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
+        # Adiciona a "flag" para não inserir novamente no futuro
+        c.execute("INSERT INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
 
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
@@ -504,9 +508,9 @@ def main():
                     st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
                     st.rerun()
     
-    with tab_regras:
+with tab_regras:
         st.subheader("Regras de Duração do Contrato por Universidade")
-        st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
+        st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses). Se uma universidade não estiver listada, o padrão de 6 meses será usado.")
 
         if 'message_rule' not in st.session_state: st.session_state.message_rule = None
         if 'confirm_delete_rule' not in st.session_state: st.session_state.confirm_delete_rule = None
@@ -529,16 +533,14 @@ def main():
         
         else:
             df_regras = list_regras()
-            st.dataframe(
-                df_regras, 
-                use_container_width=True, 
-                hide_index=True,
-                column_config={
-                    "id": st.column_config.NumberColumn("ID", width="small"),
-                    "keyword": st.column_config.TextColumn("Universidade", width="large"),
-                    "meses": st.column_config.NumberColumn("Meses", width="small")
-                }
-            )
+            
+            if df_regras.empty:
+                st.info("Nenhuma regra cadastrada. Universidades sem regra específica usarão o padrão de 6 meses.")
+            else:
+                # Renomeia a coluna para exibição no st.table
+                df_regras_display = df_regras.rename(columns={"id": "ID", "keyword": "Universidade", "meses": "Meses"})
+                st.table(df_regras_display)
+
             st.divider()
 
             c1, c2, c3 = st.columns(3)
@@ -556,13 +558,13 @@ def main():
                     add_button = st.form_submit_button("Adicionar")
                     if add_button and keyword_final.strip():
                         add_regra(keyword_final, meses)
-                        st.session_state.message_rule = {'text': f"Regra '{keyword_final}' adicionada/atualizada!", 'type': 'success'}
+                        st.session_state.message_rule = {'text': f"Regra para '{keyword_final}' adicionada/atualizada!", 'type': 'success'}
                         st.rerun()
             with c2:
                 with st.form("form_edit_regra"):
                     st.subheader("Editar Regra")
                     if not df_regras.empty:
-                        id_para_editar = st.selectbox("Selecione o ID para editar", options=df_regras['id'].tolist())
+                        id_para_editar = st.selectbox("Selecione o ID", options=df_regras['id'].tolist())
                         regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
                         novo_keyword = st.text_input("Universidade", value=regra_selecionada['keyword']).upper()
                         novos_meses = st.number_input("Novos meses", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
@@ -571,20 +573,24 @@ def main():
                             update_regra(id_para_editar, novo_keyword, novos_meses)
                             st.session_state.message_rule = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
                             st.rerun()
-                    else: st.info("Nenhuma regra para editar.")
+                    else: 
+                        st.info("Nenhuma regra para editar.")
+                        st.form_submit_button("Salvar Alterações", disabled=True)
             
             with c3:
                 with st.form("form_delete_regra"):
                     st.subheader("Excluir Regra")
                     if not df_regras.empty:
                         opcoes = {f"{r['id']} - {r['keyword']}": r for i, r in df_regras.iterrows()}
-                        regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
+                        regra_para_deletar_str = st.selectbox("Selecione a regra", options=opcoes.keys())
                         delete_button = st.form_submit_button("🗑️ Excluir")
                         if delete_button and regra_para_deletar_str:
                             regra_selecionada = opcoes[regra_para_deletar_str]
                             st.session_state.confirm_delete_rule = {'id': regra_selecionada['id'], 'keyword': regra_selecionada['keyword']}
                             st.rerun()
-                    else: st.info("Nenhuma regra para excluir.")
+                    else: 
+                        st.info("Nenhuma regra para excluir.")
+                        st.form_submit_button("🗑️ Excluir", disabled=True)
 
     with tab_io:
         st.subheader("Importar / Exportar Dados")
@@ -613,3 +619,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
