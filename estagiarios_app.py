@@ -8,12 +8,13 @@ import sqlite3
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 from PIL import Image
+from streamlit_option_menu import option_menu
 
 # ==========================
 # Configurações e Constantes
 # ==========================
 DB_FILE = "estagiarios.db"
-LOGO_FILE = "logo.png"
+LOGO_FILE = "logo.png" # IMPORTANTE: Garanta que este arquivo está no seu repositório GitHub
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
@@ -87,7 +88,7 @@ def load_custom_css():
             }
             
             .main > div { background-color: var(--background-color); }
-            [data-testid="stSidebar"] { background-color: var(--secondary-background-color); border-right: 1px solid #333; }
+            [data-testid="stSidebar"] { background-color: var(--secondary-background-color); }
             
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
             h1 { color: var(--primary-color) !important; }
@@ -117,13 +118,6 @@ def load_custom_css():
                 color: #D9534F;
             }
 
-            [data-baseweb="tab"][aria-selected="true"] {
-                background-color: transparent;
-                border-bottom: 3px solid var(--primary-color);
-            }
-            [data-baseweb="tab"] {
-                background-color: var(--secondary-background-color);
-            }
             [data-testid="stMetric"] {
                 background-color: var(--secondary-background-color);
                 border-radius: 10px;
@@ -187,10 +181,11 @@ def set_config(key: str, value: str):
     conn.commit()
 
 # ==========================
-# Funções de Lógica e Auxiliares
+# Funções de Lógica e CRUD
 # ==========================
 def list_regras() -> pd.DataFrame:
-    return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
+    df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
+    return df
 
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
@@ -306,7 +301,6 @@ def main():
     load_custom_css()
     init_db()
 
-    # Layout do Cabeçalho
     c1, c2 = st.columns([1, 5], vertical_alignment="center")
     with c1:
         if os.path.exists(LOGO_FILE):
@@ -316,7 +310,6 @@ def main():
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
     st.divider()
 
-    # Barra Lateral
     proximos_dias_input = st.sidebar.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
     set_config("proximos_dias", str(proximos_dias_input))
     st.sidebar.divider()
@@ -342,12 +335,22 @@ def main():
                 db_bytes = f.read()
             st.sidebar.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
 
-    # Abas
-    tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
-
-    with tab_dash:
-        df = list_estagiarios_df()
+    selected = option_menu(
+        menu_title=None,
+        options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
+        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "5px !important", "background-color": "#212121", "border-radius": "8px"},
+            "icon": {"color": "#E2A144", "font-size": "20px"},
+            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "--hover-color": "#333"},
+            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
+        }
+    )
+    
+    if selected == "Dashboard":
         st.subheader("📊 Métricas Gerais")
+        df = list_estagiarios_df()
         if df.empty:
             st.info("Nenhum estagiário cadastrado para exibir métricas.")
         else:
@@ -358,10 +361,7 @@ def main():
             c2.metric("✅ Contratos OK", ok)
             c3.metric("⚠️ Vencimentos Próximos", prox)
             c4.metric("⛔ Contratos Vencidos", venc)
-            
-            st.subheader("🎓 Estagiários por Universidade")
-            st.bar_chart(df['universidade'].value_counts())
-
+        
         st.subheader("📋 Consulta de Estagiários")
         if df.empty:
             st.info("Nenhum estagiário cadastrado ainda.")
@@ -380,13 +380,12 @@ def main():
                 st.dataframe(df_view, use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
-    with tab_cad:
+    if selected == "Cadastro/Editar":
         st.subheader("Gerenciar Cadastro de Estagiário")
         
         if 'form_mode' not in st.session_state: st.session_state.form_mode = None
         if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
         if 'message' not in st.session_state: st.session_state.message = None
-        if 'cadastro_universidade' not in st.session_state: st.session_state.cadastro_universidade = None
         if 'confirm_delete' not in st.session_state: st.session_state.confirm_delete = None
 
         if st.session_state.message:
@@ -411,7 +410,6 @@ def main():
         if c1.button("➕ Novo Cadastro", disabled=bool(st.session_state.confirm_delete)):
             st.session_state.form_mode = 'new'
             st.session_state.est_selecionado_id = None
-            st.session_state.cadastro_universidade = None
             st.rerun()
 
         df_estagiarios = list_estagiarios_df()
@@ -428,29 +426,22 @@ def main():
         if nome_selecionado:
             id_novo = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
             if st.session_state.est_selecionado_id != id_novo:
-                st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = id_novo, 'edit', None
+                st.session_state.est_selecionado_id, st.session_state.form_mode = id_novo, 'edit'
                 st.rerun()
         elif st.session_state.est_selecionado_id is not None and not nome_selecionado:
-             st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = None, None, None
+             st.session_state.est_selecionado_id, st.session_state.form_mode = None, None
              st.rerun()
 
-        if st.session_state.form_mode in ['new', 'edit']:
+        if st.session_state.form_mode in ['new', 'edit'] and not st.session_state.confirm_delete:
             est_selecionado_dict = None
-            universidade_para_form = st.session_state.cadastro_universidade
-            
-            if st.session_state.form_mode == 'edit':
-                if st.session_state.est_selecionado_id and not df_estagiarios.empty:
-                    resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
-                    if not resultado.empty: 
-                        est_selecionado_dict = resultado.iloc[0].to_dict()
-                        universidade_para_form = est_selecionado_dict["universidade"]
+            if st.session_state.form_mode == 'edit' and st.session_state.est_selecionado_id and not df_estagiarios.empty:
+                resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
+                if not resultado.empty: est_selecionado_dict = resultado.iloc[0].to_dict()
 
             with st.form("form_cadastro"):
-                if st.session_state.form_mode == 'new': 
-                    st.subheader("Novo Cadastro de Estagiário")
-                elif est_selecionado_dict: 
-                    st.subheader(f"Editando: {est_selecionado_dict['nome']}")
-
+                if st.session_state.form_mode == 'new': st.subheader("Novo Cadastro de Estagiário")
+                elif est_selecionado_dict: st.subheader(f"Editando: {est_selecionado_dict['nome']}")
+                
                 nome_default = est_selecionado_dict["nome"] if est_selecionado_dict else ""
                 uni_default = est_selecionado_dict["universidade"] if est_selecionado_dict else None
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else 0
@@ -493,7 +484,7 @@ def main():
                         elif est_selecionado_dict:
                             update_estagiario(est_selecionado_dict["id"], nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
                             st.session_state.message = {'text': f"Estagiário {nome_upper} atualizado!", 'type': 'success'}
-                        st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
+                        st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
                     st.rerun()
 
                 if delete and est_selecionado_dict:
@@ -501,12 +492,12 @@ def main():
                     st.rerun()
 
                 if cancelar:
-                    st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
+                    st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
                     st.rerun()
 
-    with tab_regras:
+    if selected == "Regras":
         st.subheader("Gerenciar Regras de Contrato")
-        st.info("Adicione, edite ou exclua as regras de duração de contrato para cada universidade.")
+        st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
 
         if 'message_rule' not in st.session_state: st.session_state.message_rule = None
         if 'confirm_delete_rule' not in st.session_state: st.session_state.confirm_delete_rule = None
@@ -530,10 +521,10 @@ def main():
         else:
             df_regras = list_regras()
             if df_regras.empty:
-                st.info("Nenhuma regra cadastrada. Universidades sem regra usarão o padrão de 6 meses.")
+                st.info("Nenhuma regra cadastrada. Universidades sem regra específica usarão o padrão de 6 meses.")
             else:
-                df_regras_display = df_regras.rename(columns={"id": "ID", "keyword": "Universidade", "meses": "Meses"})
-                st.table(df_regras_display)
+                st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Meses"}))
+
             st.divider()
 
             c1, c2 = st.columns(2)
@@ -559,7 +550,7 @@ def main():
                     if not df_regras.empty:
                         opcoes = {f"{r['id']} - {r['keyword']}": r for _, r in df_regras.iterrows()}
                         regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
-                        delete_button = st.form_submit_button("🗑️ Excluir Regra Selecionada")
+                        delete_button = st.form_submit_button("🗑️ Excluir")
                         if delete_button and regra_para_deletar_str:
                             regra_selecionada = opcoes[regra_para_deletar_str]
                             st.session_state.confirm_delete_rule = {'id': regra_selecionada['id'], 'keyword': regra_selecionada['keyword']}
@@ -568,7 +559,7 @@ def main():
                         st.info("Nenhuma regra para excluir.")
                         st.form_submit_button("🗑️ Excluir", disabled=True)
 
-    with tab_io:
+    if selected == "Import/Export":
         st.subheader("Importar / Exportar Dados")
         st.info("O arquivo Excel deve conter as colunas: 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao' (opcional), 'obs' (opcional).")
         arquivo = st.file_uploader("Importar de um arquivo Excel (.xlsx)", type=["xlsx"])
