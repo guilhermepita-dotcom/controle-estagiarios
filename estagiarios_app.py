@@ -14,7 +14,7 @@ from streamlit_option_menu import option_menu
 # Configurações e Constantes
 # ==========================
 DB_FILE = "estagiarios.db"
-LOGO_FILE = "logo.png" # IMPORTANTE: Garanta que este arquivo está no seu repositório GitHub
+LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
@@ -79,6 +79,7 @@ def load_custom_css():
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
                 --text-color: #EAEAEA;
+                --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -132,6 +133,11 @@ def load_custom_css():
                 padding: 25px;
                 border: 1px solid #333;
             }
+            
+            /* Efeito de hover para o texto do menu */
+            li[data-testid="stMenuIIsHorizontal"] > a:hover {
+                color: var(--primary-color) !important;
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -144,6 +150,7 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# (O restante das funções de banco de dados e lógica permanece o mesmo)
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
@@ -180,9 +187,6 @@ def set_config(key: str, value: str):
     c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
     conn.commit()
 
-# ==========================
-# Funções de Lógica e CRUD
-# ==========================
 def list_regras() -> pd.DataFrame:
     df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
     return df
@@ -339,12 +343,27 @@ def main():
         menu_title=None,
         options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
         icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
+        menu_icon="cast", # Ícone adicionado para corrigir o bug do texto
+        default_index=0,
         orientation="horizontal",
         styles={
-            "container": {"padding": "5px !important", "background-color": "#212121", "border-radius": "8px"},
-            "icon": {"color": "#E2A144", "font-size": "20px"},
-            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "--hover-color": "#333"},
-            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
+            "container": {"padding": "0!important", "background-color": "transparent"},
+            "icon": {"color": "var(--primary-color)", "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px",
+                "text-align": "center",
+                "margin": "0px",
+                "padding-bottom": "10px",
+                "color": "var(--text-color-muted)",
+                "border-bottom": "2px solid transparent",
+                "transition": "color 0.2s, border-bottom 0.2s",
+            },
+            "nav-link-selected": {
+                "background-color": "transparent",
+                "color": "var(--primary-color)",
+                "border-bottom": "2px solid var(--primary-color)",
+                "font-weight": "600",
+            },
         }
     )
     
@@ -586,3 +605,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
