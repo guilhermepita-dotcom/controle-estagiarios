@@ -12,16 +12,11 @@ from PIL import Image
 # ==========================
 # Configurações e Constantes
 # ==========================
-# O ARQUIVO DO BANCO DE DADOS AGORA FICA NA RAIZ DO PROJETO.
-# ISTO GARANTE A PERSISTÊNCIA NO STREAMLIT CLOUD.
 DB_FILE = "estagiarios.db"
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
-
-# Senha do admin para backup (pode ser colocada nos Secrets depois)
-ADMIN_PASSWORD = "Smb123456" 
 
 universidades_padrao = [
     "Anhanguera - Instituição de Ensino Anhanguera",
@@ -71,7 +66,7 @@ universidades_padrao = [
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
 # ==========================
-# Banco de Dados (VOLTAMOS PARA O SQLITE3 PADRÃO)
+# Banco de Dados (Usando sqlite3 para persistência no Streamlit Cloud)
 # ==========================
 @contextmanager
 def get_conn():
@@ -103,6 +98,8 @@ def init_db():
         for kw, meses in DEFAULT_REGRAS:
             c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
         c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
+        if "admin_password" not in get_config("admin_password", ""):
+             c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
 
 
 def get_config(key: str, default: Optional[str] = None) -> str:
@@ -119,11 +116,14 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e Auxiliares
 # ==========================
-# (O restante das funções permanece o mesmo, mas adaptado para o cursor do sqlite3)
 
 def list_estagiarios_df() -> pd.DataFrame:
     with get_conn() as conn:
-        df = pd.read_sql_query("SELECT * FROM estagiarios ORDER BY date(data_vencimento) ASC", conn)
+        df = pd.read_sql_query("SELECT * FROM estagiarios", conn)
+    # Garante a ordenação correta por data
+    df['data_vencimento_obj'] = pd.to_datetime(df['data_vencimento'], errors='coerce')
+    df = df.sort_values(by='data_vencimento_obj', ascending=True).drop(columns=['data_vencimento_obj'])
+    
     for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
         df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
     df["ultimo_ano"] = df["data_admissao"].apply(lambda d: "SIM" if d and date.today() >= d + relativedelta(years=1, months=6) else "NÃO")
@@ -148,7 +148,7 @@ def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date,
             "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, ultimo_ano=?, obs=?, data_vencimento=? WHERE id=?",
             (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, ultimo_ano, obs, str(data_venc) if data_venc else None, est_id)
         )
-# ... (outras funções como delete, list_regras, etc. continuam funcionando da mesma forma)
+
 def delete_estagiario(est_id: int):
     with get_conn() as conn:
         c = conn.cursor()
@@ -178,9 +178,11 @@ def meses_por_universidade(universidade: str) -> int:
             meses_encontrados.append(int(row["meses"]))
     return max(meses_encontrados)
 
-def calcular_vencimento(universidade: str, data_adm: Optional[date], data_renov: Optional[date]) -> Optional[date]:
+# LÓGICA DE DATAS ATUALIZADA
+def calcular_vencimento_final(data_adm: Optional[date], universidade: str) -> Optional[date]:
     if not data_adm: return None
     total_meses = meses_por_universidade(universidade)
+    # O vencimento final é sempre baseado na data de admissão e na regra total de meses
     return data_adm + relativedelta(months=total_meses)
 
 def classificar_status(data_venc: Optional[date], proximos_dias: int) -> str:
@@ -190,15 +192,33 @@ def classificar_status(data_venc: Optional[date], proximos_dias: int) -> str:
     if delta <= proximos_dias: return "Venc.Proximo"
     return "OK"
 
+# NOVA LÓGICA PARA PRÓXIMA RENOVAÇÃO
 def calcular_proxima_renovacao(row: pd.Series) -> str:
     hoje = date.today()
-    data_adm, data_ult_renov, data_venc_final = row['data_admissao'], row['data_ult_renovacao'], row['data_vencimento']
-    if pd.isna(data_venc_final) or data_venc_final < hoje: return ""
+    
+    data_adm = row['data_admissao']
+    data_ult_renov = row['data_ult_renovacao']
+    data_venc_final = row['data_vencimento']
+    termo_meses = meses_por_universidade(row['universidade'])
+
+    if pd.isna(data_adm) or pd.isna(data_venc_final) or data_venc_final < hoje:
+        return ""
+    
+    if termo_meses >= 24:
+        return "Contrato Único"
+
     base_date = data_ult_renov if pd.notna(data_ult_renov) else data_adm
-    if pd.isna(base_date): return ""
-    intervalo_meses = 6
-    proxima_data_renovacao = base_date + relativedelta(months=intervalo_meses)
-    if proxima_data_renovacao > data_venc_final: return "Término do Contrato"
+    
+    # Assumimos um ciclo de renovação de 6 meses para contratos menores que 24 meses
+    ciclo_renovacao = 6
+    proxima_data_renovacao = base_date + relativedelta(months=ciclo_renovacao)
+
+    if proxima_data_renovacao > data_venc_final:
+        return "Término do Contrato"
+    
+    if proxima_data_renovacao < hoje:
+        return "Renovação Pendente"
+        
     return proxima_data_renovacao.strftime("%d.%m.%Y")
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
@@ -250,39 +270,58 @@ def main():
     
     st.divider()
 
+    # --- Barra Lateral (Sidebar) ---
     proximos_dias = int(get_config("proximos_dias", str(DEFAULT_PROXIMOS_DIAS)))
     proximos_dias_input = st.sidebar.number_input("Janela 'Venc.Proximo' (dias)", min_value=1, max_value=120, value=proximos_dias, step=1)
     if proximos_dias_input != proximos_dias:
         set_config("proximos_dias", str(proximos_dias_input))
 
     st.sidebar.title("Área Administrativa")
-    admin_pw = st.sidebar.text_input("Senha de Administrador", type="password")
     
-    if admin_pw == ADMIN_PASSWORD:
+    if 'admin_logged_in' not in st.session_state:
+        st.session_state.admin_logged_in = False
+
+    if not st.session_state.admin_logged_in:
+        admin_pw = st.sidebar.text_input("Senha de Administrador", type="password", key="admin_pw_input")
+        if st.sidebar.button("Entrar"):
+            if admin_pw == get_config("admin_password"):
+                st.session_state.admin_logged_in = True
+                st.rerun()
+            elif admin_pw:
+                st.sidebar.error("Senha incorreta.")
+    
+    if st.session_state.admin_logged_in:
         st.sidebar.success("Acesso liberado!")
+        if st.sidebar.button("Sair"):
+            st.session_state.admin_logged_in = False
+            st.rerun()
+        
         st.sidebar.subheader("Backup do Banco de Dados")
-        st.sidebar.info("Clique no botão abaixo para baixar uma cópia completa do banco de dados (arquivo .db).")
+        st.sidebar.info("Clique para baixar uma cópia completa do banco de dados.")
         if os.path.exists(DB_FILE):
             with open(DB_FILE, "rb") as f:
                 db_bytes = f.read()
-            st.sidebar.download_button(label="📥 Baixar Backup do Banco de Dados", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
-    elif admin_pw:
-        st.sidebar.error("Senha incorreta.")
+            st.sidebar.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
 
+    # --- Abas Principais ---
     tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
 
-    # Todas as outras partes do main() continuam iguais...
+    # ==========================
+    # ABA: Dashboard
+    # ==========================
     with tab_dash:
         df = list_estagiarios_df()
         if df.empty:
             st.info("Nenhum estagiário cadastrado ainda.")
         else:
             df_calc = df.copy()
+            for col in ["data_admissao", "data_ult_renovacao", "data_vencimento", "universidade"]:
+                df_calc[col] = df[col]
             for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
                 df_calc[col] = pd.to_datetime(df_calc[col], dayfirst=True, errors='coerce').dt.date
 
             df["status"] = df_calc["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
-            df["Próxima_renovação"] = df_calc.apply(calcular_proxima_renovacao, axis=1)
+            df["proxima_renovacao"] = df_calc.apply(calcular_proxima_renovacao, axis=1)
             
             total, ok, prox, venc = len(df), (df["status"] == "OK").sum(), (df["status"] == "Venc.Proximo").sum(), (df["status"] == "Vencido").sum()
             c1, c2, c3, c4 = st.columns(4)
@@ -302,12 +341,29 @@ def main():
             if df_view.empty:
                 st.warning("Nenhum registro encontrado para os filtros selecionados.")
             else:
-                st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True, hide_index=True)
+                # REORDENAÇÃO DAS COLUNAS
+                colunas_ordenadas = ['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'status', 'ultimo_ano', 'proxima_renovacao', 'data_vencimento', 'obs']
+                df_view = df_view[[col for col in colunas_ordenadas if col in df_view.columns]]
+                
+                st.dataframe(
+                    df_view,
+                    column_config={
+                        "nome": st.column_config.TextColumn(label="Nome", width="large"),
+                        "id": "ID", "universidade": "Universidade", "data_admissao": "Admissão",
+                        "data_ult_renovacao": "Últ. Renovação", "status": "Status", "ultimo_ano": "Último Ano?",
+                        "proxima_renovacao": "Próx. Renovação", "data_vencimento": "Venc. Final", "obs": "Observação"
+                    },
+                    use_container_width=True,
+                    hide_index=True
+                )
                 st.download_button("📥 Exportar Resultado para Excel", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
+    # ==========================
+    # ABA: Cadastro/Editar
+    # ==========================
     with tab_cad:
         st.subheader("Gerenciar Cadastro de Estagiário")
-
+        
         if 'form_mode' not in st.session_state: st.session_state.form_mode = None
         if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
         if 'message' not in st.session_state: st.session_state.message = None
@@ -343,7 +399,6 @@ def main():
              st.rerun()
 
         if st.session_state.form_mode in ['new', 'edit']:
-            # ... (código do formulário continua o mesmo)
             est_selecionado = None
             if st.session_state.form_mode == 'edit' and st.session_state.est_selecionado_id:
                 resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
@@ -371,7 +426,7 @@ def main():
                 
                 c1_form, c2_form = st.columns(2)
                 data_adm = c1_form.date_input("Data de Admissão*", value=data_adm_default, key=f"dta_adm_{form_key_suffix}")
-                data_renov = c2_form.date_input("Data da Última Renovação (se houver)", value=data_renov_default, key=f"dta_renov_{form_key_suffix}")
+                data_renov = c2_form.date_input("Data da Última Renovação", value=data_renov_default, key=f"dta_renov_{form_key_suffix}")
                 obs = st.text_area("Observações", value=obs_default, height=100, key=f"obs_{form_key_suffix}")
                 st.markdown("---")
                 
@@ -385,7 +440,7 @@ def main():
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     else:
                         nome_upper, universidade_upper, obs_upper = nome.strip().upper(), universidade_final.strip().upper(), obs.strip().upper()
-                        data_venc = calcular_vencimento(universidade_upper, data_adm, data_renov)
+                        data_venc = calcular_vencimento_final(data_adm, universidade_upper)
                         if est_selecionado is None:
                             insert_estagiario(nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
                             st.session_state.message = {'text': f"Estagiário {nome_upper} cadastrado!", 'type': 'success'}
@@ -404,18 +459,19 @@ def main():
                 if cancelar:
                     st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
                     st.rerun()
-    #... (resto do código das abas Regras e Import/Export continua igual)
+    
+    # ... (resto do código das abas Regras e Import/Export continua igual)
     with tab_regras:
         st.subheader("Regras de Duração do Contrato por Universidade (em meses)")
-        st.info("O sistema aplicará a regra com o maior número de meses que corresponda a uma palavra-chave no nome da universidade.")
+        st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
         df_regras = list_regras()
         st.dataframe(df_regras, use_container_width=True, hide_index=True)
         c1, c2 = st.columns(2)
         with c1:
             with st.form("form_regras"):
                 st.subheader("Adicionar Nova Regra")
-                keyword = st.text_input("🔎 Palavra-chave da Universidade").upper() # ÍCONE ADICIONADO
-                meses = st.number_input("Meses de contrato", min_value=1, max_value=60, value=6, step=1)
+                keyword = st.text_input("🔎 Palavra-chave da Universidade").upper()
+                meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
                 add_button = st.form_submit_button("Adicionar Regra")
                 if add_button and keyword.strip():
                     add_regra(keyword, meses)
@@ -428,7 +484,7 @@ def main():
                     id_para_editar = st.selectbox("Selecione o ID da regra para editar", options=df_regras['id'].tolist())
                     regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
                     novo_keyword = st.text_input("Novo nome/palavra-chave", value=regra_selecionada['keyword']).upper()
-                    novos_meses = st.number_input("Novos meses de contrato", min_value=1, max_value=60, value=int(regra_selecionada['meses']), step=1)
+                    novos_meses = st.number_input("Novos meses de contrato", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
                     update_button = st.form_submit_button("Salvar Alterações")
                     if update_button and novo_keyword.strip():
                         update_regra(id_para_editar, novo_keyword, novos_meses)
@@ -452,7 +508,7 @@ def main():
                         data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
                         obs = str(row.get("obs","")).strip().upper()
                         if nome and universidade and data_adm:
-                            data_venc = calcular_vencimento(universidade, data_adm, data_renov)
+                            data_venc = calcular_vencimento_final(data_adm, universidade)
                             insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
                             count += 1
                     except Exception as e: st.warning(f"Erro ao importar a linha com nome '{nome}': {e}")
@@ -461,7 +517,5 @@ def main():
         df_export = list_estagiarios_df()
         st.download_button("📥 Exportar Todos os Dados para Excel", exportar_para_excel_bytes(df_export), "estagiarios_export_completo.xlsx")
 
-
 if __name__ == "__main__":
     main()
-
