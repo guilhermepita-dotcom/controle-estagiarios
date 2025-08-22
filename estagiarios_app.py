@@ -133,11 +133,6 @@ def load_custom_css():
                 padding: 25px;
                 border: 1px solid #333;
             }
-            
-            /* Efeito de hover para o texto do menu */
-            li[data-testid="stMenuIIsHorizontal"] > a:hover {
-                color: var(--primary-color) !important;
-            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -150,7 +145,6 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# (O restante das funções de banco de dados e lógica permanece o mesmo)
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
@@ -187,6 +181,9 @@ def set_config(key: str, value: str):
     c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
     conn.commit()
 
+# ==========================
+# Funções de Lógica e CRUD
+# ==========================
 def list_regras() -> pd.DataFrame:
     df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
     return df
@@ -343,25 +340,21 @@ def main():
         menu_title=None,
         options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
         icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
-        menu_icon="cast", # Ícone adicionado para corrigir o bug do texto
+        menu_icon="list-task", 
         default_index=0,
         orientation="horizontal",
         styles={
-            "container": {"padding": "0!important", "background-color": "transparent"},
+            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
             "icon": {"color": "var(--primary-color)", "font-size": "20px"},
             "nav-link": {
-                "font-size": "16px",
-                "text-align": "center",
-                "margin": "0px",
-                "padding-bottom": "10px",
-                "color": "var(--text-color-muted)",
-                "border-bottom": "2px solid transparent",
-                "transition": "color 0.2s, border-bottom 0.2s",
+                "font-size": "16px", "text-align": "center", "margin": "0px",
+                "padding-bottom": "10px", "color": "var(--text-color-muted)",
+                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
             },
             "nav-link-selected": {
                 "background-color": "transparent",
                 "color": "var(--primary-color)",
-                "border-bottom": "2px solid var(--primary-color)",
+                "border-bottom": "3px solid var(--primary-color)",
                 "font-weight": "600",
             },
         }
@@ -462,7 +455,7 @@ def main():
                 elif est_selecionado_dict: st.subheader(f"Editando: {est_selecionado_dict['nome']}")
                 
                 nome_default = est_selecionado_dict["nome"] if est_selecionado_dict else ""
-                uni_default = est_selecionado_dict["universidade"] if est_selecionado_dict else None
+                uni_default = est_selecionado_dict.get("universidade") if est_selecionado_dict else None
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else 0
                 
                 nome = st.text_input("Nome*", value=nome_default)
@@ -543,7 +536,6 @@ def main():
                 st.info("Nenhuma regra cadastrada. Universidades sem regra específica usarão o padrão de 6 meses.")
             else:
                 st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Meses"}))
-
             st.divider()
 
             c1, c2 = st.columns(2)
@@ -605,4 +597,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    
