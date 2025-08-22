@@ -13,8 +13,13 @@ from streamlit_option_menu import option_menu
 # ==========================
 # Configurações e Constantes
 # ==========================
-DB_FILE = "estagiarios.db"
-LOGO_FILE = "logo.png"
+# --- NOVA LÓGICA DE CAMINHOS ---
+# Pega o caminho absoluto da pasta onde o script está rodando
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# Cria o caminho completo para os arquivos, garantindo que sempre sejam encontrados
+DB_FILE = os.path.join(SCRIPT_DIR, "estagiarios.db")
+LOGO_FILE = os.path.join(SCRIPT_DIR, "logo.png")
+
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
@@ -79,7 +84,7 @@ def load_custom_css():
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
                 --text-color: #EAEAEA;
-                --text-color-dark: #0F0F0F;
+                --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -314,23 +319,20 @@ def main():
         st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
     
-    # Centraliza o menu usando colunas
-    _, mid_col, _ = st.columns([1, 3, 1])
-    with mid_col:
-        selected = option_menu(
-            menu_title=None,
-            options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export", "Área Administrativa"],
-            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
-            menu_icon="cast", 
-            default_index=0,
-            orientation="horizontal",
-            styles={
-                "container": {"padding": "5px !important", "background-color": "#FFFFFF", "border-radius": "8px"},
-                "icon": {"color": "#E2A144", "font-size": "20px"},
-                "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "color": "#0F0F0F", "--hover-color": "#eee"},
-                "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
-            }
-        )
+    selected = option_menu(
+        menu_title=None,
+        options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export", "Área Administrativa"],
+        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+        menu_icon="cast", 
+        default_index=0,
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "5px !important", "background-color": "#212121", "border-radius": "8px", "margin": "10px 0"},
+            "icon": {"color": "#E2A144", "font-size": "20px"},
+            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "--hover-color": "#333"},
+            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
+        }
+    )
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
