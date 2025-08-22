@@ -282,13 +282,13 @@ def highlight_status_and_year(row):
 def main():
     init_db()
 
-    # --- NOVO: Layout do Cabeçalho com Logo à Esquerda ---
+    # --- Layout do Cabeçalho com Logo à Esquerda ---
     col1, col2 = st.columns([1, 4], vertical_alignment="center")
 
     with col1:
         if os.path.exists(LOGO_FILE):
             logo = Image.open(LOGO_FILE)
-            st.image(logo, width=300)
+            st.image(logo, width=200)
 
     with col2:
         st.markdown(
@@ -313,7 +313,7 @@ def main():
     ])
 
     # ==========================
-    # Dashboard
+    # Dashboard (SEÇÃO CORRIGIDA)
     # ==========================
     with tab_dash:
         df = list_estagiarios_df()
@@ -347,16 +347,17 @@ def main():
             if filtro_nome.strip():
                 df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
 
-            df_view['status'] = df['status']
-            
-            st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True, hide_index=True)
-
-            st.download_button(
-                "📥 Exportar para Excel",
-                exportar_para_excel_bytes(df_view),
-                file_name="estagiarios_export.xlsx",
-                key="download_dashboard"
-            )
+            # --- LÓGICA DE EXIBIÇÃO CORRIGIDA ---
+            if df_view.empty:
+                st.warning("Nenhum registro encontrado para os filtros selecionados.")
+            else:
+                st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True, hide_index=True)
+                st.download_button(
+                    "📥 Exportar Resultado para Excel",
+                    exportar_para_excel_bytes(df_view),
+                    file_name="estagiarios_filtrados.xlsx",
+                    key="download_dashboard"
+                )
 
     # ==========================
     # Cadastro/Editar
@@ -546,4 +547,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
