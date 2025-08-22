@@ -18,6 +18,9 @@ DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
 
+# ==========================
+# Listas e Variáveis Globais
+# ==========================
 universidades_padrao = [
     "Anhanguera - Instituição de Ensino Anhanguera",
     "CBPF – Centro Brasileiro de Pesquisas Físicas",
@@ -66,7 +69,7 @@ universidades_padrao = [
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
 # ==========================
-# Banco de Dados (Usando sqlite3 para persistência no Streamlit Cloud)
+# Banco de Dados
 # ==========================
 @contextmanager
 def get_conn():
@@ -98,9 +101,7 @@ def init_db():
         for kw, meses in DEFAULT_REGRAS:
             c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
         c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
-        if "admin_password" not in get_config("admin_password", ""):
-             c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
-
+        c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
 
 def get_config(key: str, default: Optional[str] = None) -> str:
     with get_conn() as conn:
@@ -116,47 +117,72 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e Auxiliares
 # ==========================
+def list_regras() -> pd.DataFrame:
+    with get_conn() as conn:
+        return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
+
+def meses_por_universidade(universidade: str) -> int:
+    if not universidade: return DEFAULT_DURATION_OTHERS
+    uni_up = universidade.upper()
+    df_regras = list_regras()
+    meses_encontrados = [DEFAULT_DURATION_OTHERS]
+    for _, row in df_regras.iterrows():
+        if row["keyword"] in uni_up:
+            meses_encontrados.append(int(row["meses"]))
+    return max(meses_encontrados)
 
 def list_estagiarios_df() -> pd.DataFrame:
     with get_conn() as conn:
         df = pd.read_sql_query("SELECT * FROM estagiarios", conn)
-    # Garante a ordenação correta por data
+    
     df['data_vencimento_obj'] = pd.to_datetime(df['data_vencimento'], errors='coerce')
     df = df.sort_values(by='data_vencimento_obj', ascending=True).drop(columns=['data_vencimento_obj'])
     
+    # Converte colunas para objetos de data para manipulação
     for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
         df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
-    df["ultimo_ano"] = df["data_admissao"].apply(lambda d: "SIM" if d and date.today() >= d + relativedelta(years=1, months=6) else "NÃO")
+
+    # NOVA LÓGICA: Ultimo Ano?
+    df["ultimo_ano"] = df["data_vencimento"].apply(lambda d: "SIM" if pd.notna(d) and d.year == date.today().year else "NÃO")
+    
+    # Formata datas para exibição (dd.mm.yyyy)
     for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
         df[col] = df[col].apply(lambda x: x.strftime("%d.%m.%Y") if pd.notnull(x) else "")
+
+    # NOVA LÓGICA: Adiciona "Contrato Único" na coluna de renovação
+    regras_df = list_regras()
+    regras_24m_keywords = [row['keyword'] for index, row in regras_df.iterrows() if row['meses'] >= 24]
+    
+    if regras_24m_keywords: # Evita erro se a lista estiver vazia
+        # Cria uma máscara booleana para as condições
+        mask = (
+            df['universidade'].str.upper().str.contains('|'.join(regras_24m_keywords), na=False) &
+            (df['data_ult_renovacao'] == "")
+        )
+        df.loc[mask, 'data_ult_renovacao'] = "Contrato Único"
+
     return df
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     with get_conn() as conn:
         c = conn.cursor()
-        ultimo_ano = 1 if date.today() >= data_adm + relativedelta(years=1, months=6) else 0
         c.execute(
-            "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, ultimo_ano, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, ultimo_ano, obs, str(data_venc) if data_venc else None)
+            "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)",
+            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
         )
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     with get_conn() as conn:
         c = conn.cursor()
-        ultimo_ano = 1 if date.today() >= data_adm + relativedelta(years=1, months=6) else 0
         c.execute(
-            "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, ultimo_ano=?, obs=?, data_vencimento=? WHERE id=?",
-            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, ultimo_ano, obs, str(data_venc) if data_venc else None, est_id)
+            "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?",
+            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
         )
 
 def delete_estagiario(est_id: int):
     with get_conn() as conn:
         c = conn.cursor()
         c.execute("DELETE FROM estagiarios WHERE id=?", (est_id,))
-
-def list_regras() -> pd.DataFrame:
-    with get_conn() as conn:
-        return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
 
 def add_regra(keyword: str, meses: int):
     with get_conn() as conn:
@@ -168,22 +194,10 @@ def update_regra(regra_id: int, keyword: str, meses: int):
         c = conn.cursor()
         c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, regra_id))
 
-def meses_por_universidade(universidade: str) -> int:
-    if not universidade: return DEFAULT_DURATION_OTHERS
-    uni_up = universidade.upper()
-    df = list_regras()
-    meses_encontrados = [DEFAULT_DURATION_OTHERS]
-    for _, row in df.iterrows():
-        if row["keyword"] in uni_up:
-            meses_encontrados.append(int(row["meses"]))
-    return max(meses_encontrados)
-
-# LÓGICA DE DATAS ATUALIZADA
-def calcular_vencimento_final(data_adm: Optional[date], universidade: str) -> Optional[date]:
+# NOVA LÓGICA: Vencimento Final é sempre 24 meses após a admissão
+def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
-    total_meses = meses_por_universidade(universidade)
-    # O vencimento final é sempre baseado na data de admissão e na regra total de meses
-    return data_adm + relativedelta(months=total_meses)
+    return data_adm + relativedelta(months=24)
 
 def classificar_status(data_venc: Optional[date], proximos_dias: int) -> str:
     if not data_venc: return "SEM DATA"
@@ -192,7 +206,7 @@ def classificar_status(data_venc: Optional[date], proximos_dias: int) -> str:
     if delta <= proximos_dias: return "Venc.Proximo"
     return "OK"
 
-# NOVA LÓGICA PARA PRÓXIMA RENOVAÇÃO
+# LÓGICA ATUALIZADA PARA PRÓXIMA RENOVAÇÃO
 def calcular_proxima_renovacao(row: pd.Series) -> str:
     hoje = date.today()
     
@@ -204,16 +218,18 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     if pd.isna(data_adm) or pd.isna(data_venc_final) or data_venc_final < hoje:
         return ""
     
+    # Se a regra da faculdade já é de 24 meses, não há renovação intermediária
     if termo_meses >= 24:
-        return "Contrato Único"
+        return "" # A informação de "Contrato Único" já está na coluna de renovação
 
     base_date = data_ult_renov if pd.notna(data_ult_renov) else data_adm
     
-    # Assumimos um ciclo de renovação de 6 meses para contratos menores que 24 meses
-    ciclo_renovacao = 6
+    ciclo_renovacao = 6 # Ciclo padrão
     proxima_data_renovacao = base_date + relativedelta(months=ciclo_renovacao)
 
-    if proxima_data_renovacao > data_venc_final:
+    # Verifica se a próxima renovação ultrapassa o limite total de 24 meses
+    limite_2_anos = data_adm + relativedelta(months=24)
+    if proxima_data_renovacao > limite_2_anos:
         return "Término do Contrato"
     
     if proxima_data_renovacao < hoje:
@@ -223,11 +239,9 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
     df_export = df.copy()
-    if 'data_vencimento_obj' in df_export.columns:
-        df_export.drop(columns=['data_vencimento_obj'], inplace=True)
     df_export['data_vencimento_obj'] = pd.to_datetime(df_export['data_vencimento'], dayfirst=True, errors='coerce')
     df_export.sort_values("data_vencimento_obj", inplace=True, na_position='first')
-    df_export.drop(columns=['data_vencimento_obj'], inplace=True)
+    df_export.drop(columns=['data_vencimento_obj'], inplace=True, errors='ignore')
     
     path_temp = "temp.xlsx"
     with pd.ExcelWriter(path_temp, engine="openpyxl") as writer:
@@ -303,7 +317,6 @@ def main():
                 db_bytes = f.read()
             st.sidebar.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
 
-    # --- Abas Principais ---
     tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
 
     # ==========================
@@ -341,7 +354,6 @@ def main():
             if df_view.empty:
                 st.warning("Nenhum registro encontrado para os filtros selecionados.")
             else:
-                # REORDENAÇÃO DAS COLUNAS
                 colunas_ordenadas = ['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'status', 'ultimo_ano', 'proxima_renovacao', 'data_vencimento', 'obs']
                 df_view = df_view[[col for col in colunas_ordenadas if col in df_view.columns]]
                 
@@ -353,8 +365,7 @@ def main():
                         "data_ult_renovacao": "Últ. Renovação", "status": "Status", "ultimo_ano": "Último Ano?",
                         "proxima_renovacao": "Próx. Renovação", "data_vencimento": "Venc. Final", "obs": "Observação"
                     },
-                    use_container_width=True,
-                    hide_index=True
+                    use_container_width=True, hide_index=True
                 )
                 st.download_button("📥 Exportar Resultado para Excel", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
@@ -407,7 +418,7 @@ def main():
             nome_default = est_selecionado["nome"] if est_selecionado is not None else ""
             uni_default_val = est_selecionado["universidade"] if est_selecionado is not None else ""
             data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_admissao"] else None
-            data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_ult_renovacao"] else None
+            data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and "Contrato" not in est_selecionado["data_ult_renovacao"] else None
             obs_default = est_selecionado["obs"] if est_selecionado is not None else ""
             form_key_suffix = str(st.session_state.est_selecionado_id) if st.session_state.est_selecionado_id else "new"
 
@@ -424,9 +435,14 @@ def main():
                 if universidade_selecionada == "Outra (cadastrar manualmente)":
                     universidade_final = st.text_input("Digite o nome da Universidade*", value=uni_default_val if uni_default_val not in universidades_padrao else "", key=f"uni_outra_{form_key_suffix}")
                 
+                termo_meses = meses_por_universidade(universidade_final)
+                
                 c1_form, c2_form = st.columns(2)
                 data_adm = c1_form.date_input("Data de Admissão*", value=data_adm_default, key=f"dta_adm_{form_key_suffix}")
-                data_renov = c2_form.date_input("Data da Última Renovação", value=data_renov_default, key=f"dta_renov_{form_key_suffix}")
+                data_renov = c2_form.date_input("Data da Última Renovação", value=data_renov_default, key=f"dta_renov_{form_key_suffix}", disabled=(termo_meses >= 24))
+                if termo_meses >= 24:
+                    c2_form.info("Contrato único. Não requer renovação.")
+
                 obs = st.text_area("Observações", value=obs_default, height=100, key=f"obs_{form_key_suffix}")
                 st.markdown("---")
                 
@@ -440,7 +456,7 @@ def main():
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     else:
                         nome_upper, universidade_upper, obs_upper = nome.strip().upper(), universidade_final.strip().upper(), obs.strip().upper()
-                        data_venc = calcular_vencimento_final(data_adm, universidade_upper)
+                        data_venc = calcular_vencimento_final(data_adm)
                         if est_selecionado is None:
                             insert_estagiario(nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
                             st.session_state.message = {'text': f"Estagiário {nome_upper} cadastrado!", 'type': 'success'}
@@ -460,9 +476,8 @@ def main():
                     st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
                     st.rerun()
     
-    # ... (resto do código das abas Regras e Import/Export continua igual)
     with tab_regras:
-        st.subheader("Regras de Duração do Contrato por Universidade (em meses)")
+        st.subheader("Regras de Duração do Contrato por Universidade")
         st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
         df_regras = list_regras()
         st.dataframe(df_regras, use_container_width=True, hide_index=True)
@@ -508,7 +523,7 @@ def main():
                         data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
                         obs = str(row.get("obs","")).strip().upper()
                         if nome and universidade and data_adm:
-                            data_venc = calcular_vencimento_final(data_adm, universidade)
+                            data_venc = calcular_vencimento_final(data_adm)
                             insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
                             count += 1
                     except Exception as e: st.warning(f"Erro ao importar a linha com nome '{nome}': {e}")
