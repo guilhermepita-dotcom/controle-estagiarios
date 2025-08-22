@@ -46,7 +46,7 @@ universidades_padrao = [
     "UNESA – Universidade Estácio de Sá",
     "UNIABEU – Centro Universitário ABEU",
     "UNICARIOCA – Centro Universitário Carioca",
-    "UNIFESO – Centro Universitário Serra dos Órgãos",
+    "UNIFESO – Centro Universitário Serra dos Orgãos",
     "UNIG – Universidade Iguaçu",
     "UNIGRANRIO – Universidade do Grande Rio",
     "UNILASALLE-RJ – Centro Universitário La Salle do Rio de Janeiro",
@@ -84,10 +84,17 @@ def init_db():
     """)
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
-    for kw, meses in DEFAULT_REGRAS:
-        c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
+    
+    # VERIFICA SE A TABELA DE REGRAS ESTÁ VAZIA ANTES DE INSERIR OS PADRÕES
+    c.execute("SELECT COUNT(*) FROM regras")
+    count = c.fetchone()[0]
+    if count == 0:
+        for kw, meses in DEFAULT_REGRAS:
+            c.execute("INSERT INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
+
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
+    
     conn.commit()
     conn.close()
 
@@ -119,11 +126,15 @@ def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
     uni_up = universidade.upper()
     df_regras = list_regras()
-    meses_encontrados = [DEFAULT_DURATION_OTHERS]
+    
+    # Procura por uma correspondência exata primeiro
     for _, row in df_regras.iterrows():
-        if row["keyword"] in uni_up:
-            meses_encontrados.append(int(row["meses"]))
-    return max(meses_encontrados)
+        if row["keyword"] == uni_up:
+            return int(row["meses"])
+            
+    # Se não encontrar, usa o padrão
+    return DEFAULT_DURATION_OTHERS
+
 
 def list_estagiarios_df() -> pd.DataFrame:
     conn = create_connection()
@@ -147,7 +158,7 @@ def list_estagiarios_df() -> pd.DataFrame:
     regras_df = list_regras()
     regras_24m_keywords = [row['keyword'] for index, row in regras_df.iterrows() if row['meses'] >= 24]
     if regras_24m_keywords:
-        mask = (df['universidade'].str.upper().str.contains('|'.join(regras_24m_keywords), na=False)) & (df['data_ult_renovacao'].isnull() | df['data_ult_renovacao'].eq(''))
+        mask = (df['universidade'].str.upper().isin(regras_24m_keywords)) & (df['data_ult_renovacao'].isnull() | df['data_ult_renovacao'].eq(''))
         df.loc[mask, 'data_ult_renovacao'] = "Contrato Único"
         
     return df
@@ -182,7 +193,7 @@ def delete_estagiario(est_id: int):
 def add_regra(keyword: str, meses: int):
     conn = create_connection()
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
+    c.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     conn.commit()
     conn.close()
 
@@ -317,7 +328,6 @@ def main():
 
     tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
 
-    # ... (O restante do código das abas permanece o mesmo)
     with tab_dash:
         df = list_estagiarios_df()
         if df.empty:
@@ -491,19 +501,19 @@ def main():
         st.subheader("Regras de Duração do Contrato por Universidade")
         st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
 
-        if 'message' not in st.session_state: st.session_state.message = None
+        if 'message_rule' not in st.session_state: st.session_state.message_rule = None
         if 'confirm_delete_rule' not in st.session_state: st.session_state.confirm_delete_rule = None
 
-        if st.session_state.message:
-            show_message(st.session_state.message)
-            st.session_state.message = None
+        if st.session_state.message_rule:
+            show_message(st.session_state.message_rule)
+            st.session_state.message_rule = None
 
         if st.session_state.confirm_delete_rule:
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
             if col1_conf.button("SIM, EXCLUIR REGRA", type="primary"):
                 delete_regra(int(st.session_state.confirm_delete_rule['id']))
-                st.session_state.message = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
+                st.session_state.message_rule = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
                 st.rerun()
             if col2_conf.button("NÃO, CANCELAR EXCLUSÃO"):
@@ -519,12 +529,18 @@ def main():
             with c1:
                 with st.form("form_add_regra"):
                     st.subheader("Adicionar Regra")
-                    keyword = st.text_input("🔎 Palavra-chave").upper()
+                    universidade_selecionada = st.selectbox("Universidade", options=universidades_padrao, index=None, placeholder="Selecione...")
+                    keyword_final = ""
+                    if universidade_selecionada == "Outra (cadastrar manualmente)":
+                        keyword_final = st.text_input("Digite a Palavra-chave ou Nome").upper()
+                    elif universidade_selecionada:
+                        keyword_final = universidade_selecionada.upper()
+                    
                     meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
                     add_button = st.form_submit_button("Adicionar")
-                    if add_button and keyword.strip():
-                        add_regra(keyword, meses)
-                        st.session_state.message = {'text': f"Regra '{keyword}' adicionada!", 'type': 'success'}
+                    if add_button and keyword_final.strip():
+                        add_regra(keyword_final, meses)
+                        st.session_state.message_rule = {'text': f"Regra '{keyword_final}' adicionada!", 'type': 'success'}
                         st.rerun()
             with c2:
                 with st.form("form_edit_regra"):
@@ -537,7 +553,7 @@ def main():
                         update_button = st.form_submit_button("Salvar")
                         if update_button and novo_keyword.strip():
                             update_regra(id_para_editar, novo_keyword, novos_meses)
-                            st.session_state.message = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
+                            st.session_state.message_rule = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
                             st.rerun()
                     else: st.info("Nenhuma regra para editar.")
             
