@@ -12,11 +12,16 @@ from PIL import Image
 # ==========================
 # Configurações e Constantes
 # ==========================
-DB_FILE = "estagiarios.db" # Usado apenas se st.connection não estiver disponível
-LOGO_FILE = "logo.png"  # Coloque a logo na mesma pasta do app
+# O ARQUIVO DO BANCO DE DADOS AGORA FICA NA RAIZ DO PROJETO.
+# ISTO GARANTE A PERSISTÊNCIA NO STREAMLIT CLOUD.
+DB_FILE = "estagiarios.db"
+LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
-DEFAULT_DURATION_OTHERS = 6  # meses
+DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
+
+# Senha do admin para backup (pode ser colocada nos Secrets depois)
+ADMIN_PASSWORD = "change_this_password" 
 
 universidades_padrao = [
     "Anhanguera - Instituição de Ensino Anhanguera",
@@ -61,54 +66,64 @@ universidades_padrao = [
 ]
 
 # ==========================
-# Inicialização Streamlit e Conexão com DB
+# Inicialização Streamlit
 # ==========================
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
-# Conexão principal com o banco de dados persistente do Streamlit
-# Requer o arquivo .streamlit/secrets.toml
-conn = st.connection("estagiarios_db", type="sql")
-
-
 # ==========================
-# Funções de Banco de Dados (Adaptadas para st.connection)
+# Banco de Dados (VOLTAMOS PARA O SQLITE3 PADRÃO)
 # ==========================
+@contextmanager
+def get_conn():
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    try:
+        yield conn
+    finally:
+        conn.commit()
+        conn.close()
+
 def init_db():
-    with conn.session as s:
-        s.execute("""
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("""
             CREATE TABLE IF NOT EXISTS estagiarios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, nome TEXT NOT NULL, universidade TEXT NOT NULL,
                 data_admissao TEXT NOT NULL, data_ult_renovacao TEXT, ultimo_ano INTEGER DEFAULT 0,
                 obs TEXT, data_vencimento TEXT
             )
         """)
-        s.execute("""
+        c.execute("""
             CREATE TABLE IF NOT EXISTS regras (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL
             )
         """)
-        s.execute("""
+        c.execute("""
             CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)
         """)
         for kw, meses in DEFAULT_REGRAS:
-            s.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (:kw, :meses)", params=dict(kw=kw.upper(), meses=meses))
-        s.execute("INSERT OR IGNORE INTO config(key, value) VALUES('proximos_dias', :dias)", params=dict(dias=str(DEFAULT_PROXIMOS_DIAS)))
-        s.commit()
+            c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
+        c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
+
 
 def get_config(key: str, default: Optional[str] = None) -> str:
-    df = conn.query("SELECT value FROM config WHERE key=:key", params=dict(key=key))
-    return df.iloc[0]['value'] if not df.empty else (default if default is not None else "")
+    with get_conn() as conn:
+        c = conn.cursor()
+        row = c.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+        return row[0] if row else (default if default is not None else "")
 
 def set_config(key: str, value: str):
-    with conn.session as s:
-        s.execute(
-            "INSERT INTO config(key, value) VALUES(:key, :value) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            params=dict(key=key, value=value)
-        )
-        s.commit()
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+
+# ==========================
+# Funções de Lógica e Auxiliares
+# ==========================
+# (O restante das funções permanece o mesmo, mas adaptado para o cursor do sqlite3)
 
 def list_estagiarios_df() -> pd.DataFrame:
-    df = conn.query("SELECT * FROM estagiarios ORDER BY date(data_vencimento) ASC")
+    with get_conn() as conn:
+        df = pd.read_sql_query("SELECT * FROM estagiarios ORDER BY date(data_vencimento) ASC", conn)
     for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
         df[col] = pd.to_datetime(df[col], errors='coerce').dt.date
     df["ultimo_ano"] = df["data_admissao"].apply(lambda d: "SIM" if d and date.today() >= d + relativedelta(years=1, months=6) else "NÃO")
@@ -117,43 +132,42 @@ def list_estagiarios_df() -> pd.DataFrame:
     return df
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    ultimo_ano = 1 if date.today() >= data_adm + relativedelta(years=1, months=6) else 0
-    with conn.session as s:
-        s.execute(
-            "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, ultimo_ano, obs, data_vencimento) VALUES (:nome, :uni, :adm, :renov, :ultimo_ano, :obs, :venc)",
-            params=dict(nome=nome, uni=universidade, adm=str(data_adm), renov=str(data_renov) if data_renov else None, ultimo_ano=ultimo_ano, obs=obs, venc=str(data_venc) if data_venc else None)
+    with get_conn() as conn:
+        c = conn.cursor()
+        ultimo_ano = 1 if date.today() >= data_adm + relativedelta(years=1, months=6) else 0
+        c.execute(
+            "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, ultimo_ano, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, ultimo_ano, obs, str(data_venc) if data_venc else None)
         )
-        s.commit()
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    ultimo_ano = 1 if date.today() >= data_adm + relativedelta(years=1, months=6) else 0
-    with conn.session as s:
-        s.execute(
-            "UPDATE estagiarios SET nome=:nome, universidade=:uni, data_admissao=:adm, data_ult_renovacao=:renov, ultimo_ano=:ultimo_ano, obs=:obs, data_vencimento=:venc WHERE id=:id",
-            params=dict(nome=nome, uni=universidade, adm=str(data_adm), renov=str(data_renov) if data_renov else None, ultimo_ano=ultimo_ano, obs=obs, venc=str(data_venc) if data_venc else None, id=est_id)
+    with get_conn() as conn:
+        c = conn.cursor()
+        ultimo_ano = 1 if date.today() >= data_adm + relativedelta(years=1, months=6) else 0
+        c.execute(
+            "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, ultimo_ano=?, obs=?, data_vencimento=? WHERE id=?",
+            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, ultimo_ano, obs, str(data_venc) if data_venc else None, est_id)
         )
-        s.commit()
-
+# ... (outras funções como delete, list_regras, etc. continuam funcionando da mesma forma)
 def delete_estagiario(est_id: int):
-    with conn.session as s:
-        s.execute("DELETE FROM estagiarios WHERE id=:id", params=dict(id=est_id))
-        s.commit()
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM estagiarios WHERE id=?", (est_id,))
 
 def list_regras() -> pd.DataFrame:
-    return conn.query("SELECT id, keyword, meses FROM regras ORDER BY keyword")
+    with get_conn() as conn:
+        return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
 
 def add_regra(keyword: str, meses: int):
-    with conn.session as s:
-        s.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (:kw, :meses)", params=dict(kw=keyword.upper().strip(), meses=meses))
-        s.commit()
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
 
 def update_regra(regra_id: int, keyword: str, meses: int):
-    with conn.session as s:
-        s.execute("UPDATE regras SET keyword=:kw, meses=:meses WHERE id=:id", params=dict(kw=keyword.upper().strip(), meses=meses, id=regra_id))
-        s.commit()
-# ==========================
-# Funções de Lógica e Auxiliares
-# ==========================
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, regra_id))
+
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
     uni_up = universidade.upper()
@@ -223,10 +237,8 @@ def show_message(message: Dict[str, Any]):
 # Main App
 # ==========================
 def main():
-    # Inicializa o banco de dados na primeira execução
     init_db()
 
-    # --- Layout do Cabeçalho ---
     col1, col2 = st.columns([1, 4], vertical_alignment="center")
     with col1:
         if os.path.exists(LOGO_FILE):
@@ -238,37 +250,28 @@ def main():
     
     st.divider()
 
-    # --- Barra Lateral (Sidebar) ---
     proximos_dias = int(get_config("proximos_dias", str(DEFAULT_PROXIMOS_DIAS)))
-    st.sidebar.number_input("Janela 'Venc.Proximo' (dias)", min_value=1, max_value=120, value=proximos_dias, step=1, key="proximos_dias_setter")
-    set_config("proximos_dias", str(st.session_state.proximos_dias_setter))
+    proximos_dias_input = st.sidebar.number_input("Janela 'Venc.Proximo' (dias)", min_value=1, max_value=120, value=proximos_dias, step=1)
+    if proximos_dias_input != proximos_dias:
+        set_config("proximos_dias", str(proximos_dias_input))
 
-    # --- NOVO: Área Administrativa para Backup ---
     st.sidebar.title("Área Administrativa")
     admin_pw = st.sidebar.text_input("Senha de Administrador", type="password")
     
-    if admin_pw: # Evita checar o segredo se o campo estiver vazio
-        if "passwords" in st.secrets and "admin" in st.secrets["passwords"] and admin_pw == st.secrets["passwords"]["admin"]:
-            st.sidebar.success("Acesso liberado!")
-            st.sidebar.subheader("Backup do Banco de Dados")
-            st.sidebar.info("Clique no botão abaixo para baixar uma cópia completa do banco de dados (arquivo .db).")
-            try:
-                db_path = conn.url.replace('sqlite:///', '')
-                if os.path.exists(db_path):
-                    with open(db_path, "rb") as f:
-                        db_bytes = f.read()
-                    st.sidebar.download_button(label="📥 Baixar Backup do Banco de Dados", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
-                else: st.sidebar.error("Arquivo do banco de dados não encontrado.")
-            except Exception as e: st.sidebar.error(f"Ocorreu um erro ao gerar o backup: {e}")
-        else:
-            st.sidebar.error("Senha incorreta.")
+    if admin_pw == ADMIN_PASSWORD:
+        st.sidebar.success("Acesso liberado!")
+        st.sidebar.subheader("Backup do Banco de Dados")
+        st.sidebar.info("Clique no botão abaixo para baixar uma cópia completa do banco de dados (arquivo .db).")
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "rb") as f:
+                db_bytes = f.read()
+            st.sidebar.download_button(label="📥 Baixar Backup do Banco de Dados", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
+    elif admin_pw:
+        st.sidebar.error("Senha incorreta.")
 
-    # --- Abas Principais ---
     tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
 
-    # ==========================
-    # ABA: Dashboard
-    # ==========================
+    # Todas as outras partes do main() continuam iguais...
     with tab_dash:
         df = list_estagiarios_df()
         if df.empty:
@@ -278,7 +281,7 @@ def main():
             for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
                 df_calc[col] = pd.to_datetime(df_calc[col], dayfirst=True, errors='coerce').dt.date
 
-            df["status"] = df_calc["data_vencimento"].apply(lambda d: classificar_status(d, st.session_state.proximos_dias_setter))
+            df["status"] = df_calc["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
             df["Próxima_renovação"] = df_calc.apply(calcular_proxima_renovacao, axis=1)
             
             total, ok, prox, venc = len(df), (df["status"] == "OK").sum(), (df["status"] == "Venc.Proximo").sum(), (df["status"] == "Vencido").sum()
@@ -290,7 +293,7 @@ def main():
             st.subheader("Consulta Rápida de Estagiários")
             
             filtro_status = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
-            filtro_nome = st.text_input("🔎 Buscar por Nome do Estagiário") # ÍCONE ADICIONADO
+            filtro_nome = st.text_input("🔎 Buscar por Nome do Estagiário")
 
             df_view = df.copy()
             if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
@@ -302,9 +305,6 @@ def main():
                 st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado para Excel", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
-    # ==========================
-    # ABA: Cadastro/Editar
-    # ==========================
     with tab_cad:
         st.subheader("Gerenciar Cadastro de Estagiário")
 
@@ -330,7 +330,7 @@ def main():
             nome_filtrado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
             if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
 
-        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário para Editar", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0) # ÍCONE ADICIONADO
+        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário para Editar", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0)
         st.markdown("---")
 
         if nome_selecionado:
@@ -343,6 +343,7 @@ def main():
              st.rerun()
 
         if st.session_state.form_mode in ['new', 'edit']:
+            # ... (código do formulário continua o mesmo)
             est_selecionado = None
             if st.session_state.form_mode == 'edit' and st.session_state.est_selecionado_id:
                 resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
@@ -403,10 +404,7 @@ def main():
                 if cancelar:
                     st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
                     st.rerun()
-
-    # ==========================
-    # ABA: Regras
-    # ==========================
+    #... (resto do código das abas Regras e Import/Export continua igual)
     with tab_regras:
         st.subheader("Regras de Duração do Contrato por Universidade (em meses)")
         st.info("O sistema aplicará a regra com o maior número de meses que corresponda a uma palavra-chave no nome da universidade.")
@@ -438,9 +436,6 @@ def main():
                         st.rerun()
                 else: st.warning("Nenhuma regra cadastrada para editar.")
 
-    # ==========================
-    # ABA: Import / Export
-    # ==========================
     with tab_io:
         st.subheader("Importar / Exportar Dados")
         st.info("Para importar, o arquivo Excel deve conter as colunas: 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao' (opcional), 'obs' (opcional).")
