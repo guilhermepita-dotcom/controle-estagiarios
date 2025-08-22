@@ -66,52 +66,54 @@ universidades_padrao = [
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
 # ==========================
-# Banco de Dados
+# Banco de Dados (COM LÓGICA DE COMMIT EXPLÍCITO)
 # ==========================
-@contextmanager
-def get_conn():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-    finally:
-        conn.commit()
-        conn.close()
+def create_connection():
+    """Cria e retorna uma conexão com o banco de dados."""
+    return sqlite3.connect(DB_FILE, check_same_thread=False)
 
 def init_db():
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS estagiarios (
-                id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL,
-                data_admissao TEXT NOT NULL, data_ult_renovacao TEXT,
-                obs TEXT, data_vencimento TEXT
-            )
-        """)
-        c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
-        c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
-        for kw, meses in DEFAULT_REGRAS:
-            c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
-        c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
-        c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS estagiarios (
+            id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL,
+            data_admissao TEXT NOT NULL, data_ult_renovacao TEXT,
+            obs TEXT, data_vencimento TEXT
+        )
+    """)
+    c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
+    c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    for kw, meses in DEFAULT_REGRAS:
+        c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
+    c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
+    c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
+    conn.commit()
+    conn.close()
 
 def get_config(key: str, default: Optional[str] = None) -> str:
-    with get_conn() as conn:
-        c = conn.cursor()
-        row = c.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
-        return row['value'] if row else (default if default is not None else "")
+    conn = create_connection()
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    row = c.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row['value'] if row else (default if default is not None else "")
 
 def set_config(key: str, value: str):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
+    conn.commit()
+    conn.close()
 
 # ==========================
 # Funções de Lógica e Auxiliares
 # ==========================
 def list_regras() -> pd.DataFrame:
-    with get_conn() as conn:
-        return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
+    conn = create_connection()
+    df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
+    conn.close()
+    return df
 
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
@@ -124,11 +126,12 @@ def meses_por_universidade(universidade: str) -> int:
     return max(meses_encontrados)
 
 def list_estagiarios_df() -> pd.DataFrame:
-    with get_conn() as conn:
-        try:
-            df = pd.read_sql_query("SELECT * FROM estagiarios", conn, index_col="id")
-        except (pd.io.sql.DatabaseError, ValueError):
-             return pd.DataFrame()
+    conn = create_connection()
+    try:
+        df = pd.read_sql_query("SELECT * FROM estagiarios", conn, index_col="id")
+    except (pd.io.sql.DatabaseError, ValueError):
+         df = pd.DataFrame()
+    conn.close()
 
     if df.empty:
         return pd.DataFrame(columns=['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'obs', 'data_vencimento'])
@@ -150,40 +153,52 @@ def list_estagiarios_df() -> pd.DataFrame:
     return df
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute(
-            "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)",
-            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
-        )
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)",
+        (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
+    )
+    conn.commit()
+    conn.close()
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute(
-            "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?",
-            (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
-        )
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute(
+        "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?",
+        (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
+    )
+    conn.commit()
+    conn.close()
 
 def delete_estagiario(est_id: int):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
+    conn.commit()
+    conn.close()
 
 def add_regra(keyword: str, meses: int):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
+    conn.commit()
+    conn.close()
 
 def update_regra(regra_id: int, keyword: str, meses: int):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
+    conn.commit()
+    conn.close()
 
 def delete_regra(regra_id: int):
-    with get_conn() as conn:
-        c = conn.cursor()
-        c.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
+    conn = create_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
+    conn.commit()
+    conn.close()
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
@@ -302,6 +317,7 @@ def main():
 
     tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
 
+    # ... (O restante do código das abas permanece o mesmo)
     with tab_dash:
         df = list_estagiarios_df()
         if df.empty:
@@ -486,7 +502,6 @@ def main():
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
             if col1_conf.button("SIM, EXCLUIR REGRA", type="primary"):
-                # CORREÇÃO: Converter o ID para inteiro antes de deletar
                 delete_regra(int(st.session_state.confirm_delete_rule['id']))
                 st.session_state.message = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
