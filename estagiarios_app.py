@@ -89,7 +89,9 @@ def load_custom_css():
             }
             
             .main > div { background-color: var(--background-color); }
-            [data-testid="stSidebar"] { background-color: var(--secondary-background-color); }
+            
+            /* OCULTA A BARRA LATERAL PADRÃO */
+            [data-testid="stSidebar"] { display: none; }
             
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
             h1 { color: var(--primary-color) !important; }
@@ -110,15 +112,7 @@ def load_custom_css():
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
-            .stButton > button[kind="primary"] {
-                background-color: #FFFFFF;
-                border-color: #D9534F;
-            }
-            .stButton > button[kind="primary"]:hover {
-                background-color: transparent;
-                color: #D9534F;
-            }
-
+            
             [data-testid="stMetric"] {
                 background-color: var(--secondary-background-color);
                 border-radius: 10px;
@@ -131,6 +125,12 @@ def load_custom_css():
                 background-color: var(--secondary-background-color);
                 border-radius: 10px;
                 padding: 25px;
+                border: 1px solid #333;
+            }
+            /* Estilo para o Expander do Admin */
+            [data-testid="stExpander"] {
+                background-color: var(--secondary-background-color);
+                border-radius: 8px;
                 border: 1px solid #333;
             }
         </style>
@@ -309,59 +309,53 @@ def main():
     with c2:
         st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
-    st.divider()
-
-    proximos_dias_input = st.sidebar.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
-    set_config("proximos_dias", str(proximos_dias_input))
-    st.sidebar.divider()
-    st.sidebar.title("Área Administrativa")
-    if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
-    admin_password = get_config("admin_password")
-    if not st.session_state.admin_logged_in:
-        admin_pw_input = st.sidebar.text_input("Senha", type="password", key="admin_pw_input", label_visibility="collapsed", placeholder="Senha de Administrador")
-        if st.sidebar.button("Entrar"):
-            if admin_pw_input == admin_password:
-                st.session_state.admin_logged_in = True
+    
+    with st.expander("🔑 Área Administrativa"):
+        if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
+        admin_password = get_config("admin_password")
+        
+        if not st.session_state.admin_logged_in:
+            admin_pw_input = st.text_input("Senha", type="password", key="admin_pw_input", label_visibility="collapsed", placeholder="Senha de Administrador")
+            if st.button("Entrar"):
+                if admin_pw_input == admin_password:
+                    st.session_state.admin_logged_in = True
+                    st.rerun()
+                elif admin_pw_input:
+                    st.error("Senha incorreta.")
+        
+        if st.session_state.admin_logged_in:
+            st.success("Acesso liberado!")
+            st.subheader("Backup do Banco de Dados")
+            if os.path.exists(DB_FILE):
+                with open(DB_FILE, "rb") as f:
+                    db_bytes = f.read()
+                st.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
+            if st.button("Sair"):
+                st.session_state.admin_logged_in = False
                 st.rerun()
-            elif admin_pw_input:
-                st.sidebar.error("Senha incorreta.")
-    if st.session_state.admin_logged_in:
-        st.sidebar.success("Acesso liberado!")
-        if st.sidebar.button("Sair"):
-            st.session_state.admin_logged_in = False
-            st.rerun()
-        st.sidebar.subheader("Backup do Banco de Dados")
-        if os.path.exists(DB_FILE):
-            with open(DB_FILE, "rb") as f:
-                db_bytes = f.read()
-            st.sidebar.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
 
     selected = option_menu(
         menu_title=None,
         options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
         icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
-        menu_icon="list-task", 
+        menu_icon="cast",
         default_index=0,
         orientation="horizontal",
         styles={
-            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
-            "icon": {"color": "var(--primary-color)", "font-size": "20px"},
-            "nav-link": {
-                "font-size": "16px", "text-align": "center", "margin": "0px",
-                "padding-bottom": "10px", "color": "var(--text-color-muted)",
-                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
-            },
-            "nav-link-selected": {
-                "background-color": "transparent",
-                "color": "var(--primary-color)",
-                "border-bottom": "3px solid var(--primary-color)",
-                "font-weight": "600",
-            },
+            "container": {"padding": "5px !important", "background-color": "#212121", "border-radius": "8px", "margin-top": "10px"},
+            "icon": {"color": "#E2A144", "font-size": "20px"},
+            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "--hover-color": "#333"},
+            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
         }
     )
     
     if selected == "Dashboard":
-        st.subheader("📊 Métricas Gerais")
+        c_dash1, c_dash2 = st.columns([3, 1])
+        with c_dash2:
+            proximos_dias_input = st.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
+            set_config("proximos_dias", str(proximos_dias_input))
+        
+        c_dash1.subheader("📊 Métricas Gerais")
         df = list_estagiarios_df()
         if df.empty:
             st.info("Nenhum estagiário cadastrado para exibir métricas.")
@@ -407,7 +401,7 @@ def main():
         if st.session_state.confirm_delete:
             st.warning(f"Tem certeza que deseja excluir o estagiário **{st.session_state.confirm_delete['name']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
-            if col1_conf.button("SIM, EXCLUIR", type="primary"):
+            if col1_conf.button("SIM, EXCLUIR"):
                 delete_estagiario(st.session_state.confirm_delete['id'])
                 st.session_state.message = {'text': f"Estagiário {st.session_state.confirm_delete['name']} excluído com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete = None
@@ -521,7 +515,7 @@ def main():
         if st.session_state.confirm_delete_rule:
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
-            if col1_conf.button("SIM, EXCLUIR REGRA", type="primary"):
+            if col1_conf.button("SIM, EXCLUIR REGRA"):
                 delete_regra(int(st.session_state.confirm_delete_rule['id']))
                 st.session_state.message_rule = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
@@ -597,5 +591,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
-
