@@ -66,7 +66,7 @@ universidades_padrao = [
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
 # ==========================
-# Banco de Dados (sqlite3 padrão)
+# Banco de Dados
 # ==========================
 @contextmanager
 def get_conn():
@@ -95,7 +95,6 @@ def init_db():
         c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
         c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
 
-
 def get_config(key: str, default: Optional[str] = None) -> str:
     with get_conn() as conn:
         c = conn.cursor()
@@ -110,7 +109,6 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e Auxiliares
 # ==========================
-
 def list_regras() -> pd.DataFrame:
     with get_conn() as conn:
         return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
@@ -136,7 +134,6 @@ def list_estagiarios_df() -> pd.DataFrame:
         return pd.DataFrame(columns=['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'obs', 'data_vencimento'])
 
     df.reset_index(inplace=True)
-    
     df['data_vencimento_obj'] = pd.to_datetime(df['data_vencimento'], errors='coerce')
     df = df.sort_values(by='data_vencimento_obj', ascending=True).drop(columns=['data_vencimento_obj'])
     
@@ -185,6 +182,12 @@ def update_regra(regra_id: int, keyword: str, meses: int):
         c = conn.cursor()
         c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, regra_id))
 
+# NOVA FUNÇÃO para excluir regra
+def delete_regra(regra_id: int):
+    with get_conn() as conn:
+        c = conn.cursor()
+        c.execute("DELETE FROM regras WHERE id=?", (regra_id,))
+
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
     return data_adm + relativedelta(months=24)
@@ -192,8 +195,8 @@ def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
 def classificar_status(data_venc: Optional[str], proximos_dias: int) -> str:
     if not data_venc or pd.isna(data_venc): return "SEM DATA"
     try:
-        data_venc_obj = pd.to_datetime(data_venc, dayfirst=False, errors='coerce').date()
-    except Exception:
+        data_venc_obj = pd.to_datetime(data_venc).date()
+    except:
         return "DATA INVÁLIDA"
     
     if pd.isna(data_venc_obj): return "SEM DATA"
@@ -207,7 +210,9 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     hoje = date.today()
     data_adm = pd.to_datetime(row['data_admissao'], dayfirst=True, errors='coerce').date()
     data_ult_renov_str = row.get('data_ult_renovacao', '')
-    data_ult_renov = pd.to_datetime(data_ult_renov_str, dayfirst=True, errors='coerce').date() if isinstance(data_ult_renov_str, str) else None
+    data_ult_renov = None
+    if isinstance(data_ult_renov_str, str) and "Contrato" not in data_ult_renov_str:
+        data_ult_renov = pd.to_datetime(data_ult_renov_str, dayfirst=True, errors='coerce').date()
 
     if pd.isna(data_adm): return ""
     
@@ -336,17 +341,34 @@ def main():
     with tab_cad:
         st.subheader("Gerenciar Cadastro de Estagiário")
         
+        # Inicialização dos estados da sessão
         if 'form_mode' not in st.session_state: st.session_state.form_mode = None
         if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
         if 'message' not in st.session_state: st.session_state.message = None
         if 'cadastro_universidade' not in st.session_state: st.session_state.cadastro_universidade = None
-        
+        if 'confirm_delete' not in st.session_state: st.session_state.confirm_delete = None
+
         if st.session_state.message:
             show_message(st.session_state.message)
             st.session_state.message = None
         
+        # Lógica de confirmação de exclusão
+        if st.session_state.confirm_delete:
+            st.warning(f"Tem certeza que deseja excluir o estagiário **{st.session_state.confirm_delete['name']}**?")
+            col1_conf, col2_conf, _ = st.columns([1,1,4])
+            if col1_conf.button("SIM, EXCLUIR", type="primary"):
+                delete_estagiario(st.session_state.confirm_delete['id'])
+                st.session_state.message = {'text': f"Estagiário {st.session_state.confirm_delete['name']} excluído com sucesso!", 'type': 'success'}
+                st.session_state.confirm_delete = None
+                st.session_state.form_mode = None
+                st.session_state.est_selecionado_id = None
+                st.rerun()
+            if col2_conf.button("NÃO, CANCELAR"):
+                st.session_state.confirm_delete = None
+                st.rerun()
+
         c1, c2 = st.columns([1, 3])
-        if c1.button("➕ Novo Cadastro"):
+        if c1.button("➕ Novo Cadastro", disabled=bool(st.session_state.confirm_delete)):
             st.session_state.form_mode = 'new'
             st.session_state.est_selecionado_id = None
             st.session_state.cadastro_universidade = None
@@ -360,7 +382,7 @@ def main():
             nome_filtrado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
             if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
 
-        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário para Editar", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0)
+        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário para Editar", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
         st.markdown("---")
 
         if nome_selecionado:
@@ -398,7 +420,7 @@ def main():
             else:
                  universidade_para_form = st.session_state.cadastro_universidade
         
-        if universidade_para_form:
+        if universidade_para_form and not st.session_state.confirm_delete:
             est_selecionado_dict = None
             if st.session_state.form_mode == 'edit' and st.session_state.est_selecionado_id and not df_estagiarios.empty:
                 resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
@@ -446,9 +468,7 @@ def main():
                     st.rerun()
 
                 if delete and est_selecionado_dict:
-                    delete_estagiario(est_selecionado_dict["id"])
-                    st.session_state.message = {'text': f"🗑️ Estagiário {est_selecionado_dict['nome']} excluído!", 'type': 'success'}
-                    st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
+                    st.session_state.confirm_delete = {'id': est_selecionado_dict['id'], 'name': est_selecionado_dict['nome']}
                     st.rerun()
 
                 if cancelar:
@@ -460,31 +480,45 @@ def main():
         st.info("Define o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
         df_regras = list_regras()
         st.dataframe(df_regras, use_container_width=True, hide_index=True)
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
-            with st.form("form_regras"):
-                st.subheader("Adicionar Nova Regra")
-                keyword = st.text_input("🔎 Palavra-chave da Universidade").upper()
+            with st.form("form_add_regra"):
+                st.subheader("Adicionar Regra")
+                keyword = st.text_input("🔎 Palavra-chave").upper()
                 meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
-                add_button = st.form_submit_button("Adicionar Regra")
+                add_button = st.form_submit_button("Adicionar")
                 if add_button and keyword.strip():
                     add_regra(keyword, meses)
-                    st.success(f"Regra '{keyword}' adicionada/atualizada!")
+                    st.success(f"Regra '{keyword}' adicionada!")
                     st.rerun()
         with c2:
-            with st.form("form_editar_regra"):
-                st.subheader("Editar Regra Existente")
+            with st.form("form_edit_regra"):
+                st.subheader("Editar Regra")
                 if not df_regras.empty:
-                    id_para_editar = st.selectbox("Selecione o ID da regra para editar", options=df_regras['id'].tolist())
+                    id_para_editar = st.selectbox("Selecione o ID", options=df_regras['id'].tolist())
                     regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
-                    novo_keyword = st.text_input("Novo nome/palavra-chave", value=regra_selecionada['keyword']).upper()
-                    novos_meses = st.number_input("Novos meses de contrato", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
-                    update_button = st.form_submit_button("Salvar Alterações")
+                    novo_keyword = st.text_input("Novo nome", value=regra_selecionada['keyword']).upper()
+                    novos_meses = st.number_input("Novos meses", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
+                    update_button = st.form_submit_button("Salvar")
                     if update_button and novo_keyword.strip():
                         update_regra(id_para_editar, novo_keyword, novos_meses)
                         st.success(f"Regra ID {id_para_editar} atualizada!")
                         st.rerun()
-                else: st.warning("Nenhuma regra cadastrada para editar.")
+                else: st.info("Nenhuma regra para editar.")
+        
+        with c3:
+            with st.form("form_delete_regra"):
+                st.subheader("Excluir Regra")
+                if not df_regras.empty:
+                    opcoes = [f"{r['id']} - {r['keyword']}" for i, r in df_regras.iterrows()]
+                    regra_para_deletar_str = st.selectbox("Selecione a regra", options=opcoes)
+                    delete_button = st.form_submit_button("🗑️ Excluir")
+                    if delete_button and regra_para_deletar_str:
+                        regra_id = int(regra_para_deletar_str.split(" - ")[0])
+                        delete_regra(regra_id)
+                        st.success(f"Regra ID {regra_id} excluída!")
+                        st.rerun()
+                else: st.info("Nenhuma regra para excluir.")
 
     with tab_io:
         st.subheader("Importar / Exportar Dados")
