@@ -215,9 +215,9 @@ def meses_por_universidade(universidade: str) -> int:
 def calcular_vencimento(universidade: str, data_adm: Optional[date], data_renov: Optional[date]) -> Optional[date]:
     if not data_adm:
         return None
-    base = data_renov if data_renov else data_adm
-    meses = meses_por_universidade(universidade)
-    return base + relativedelta(months=meses)
+    # O vencimento final é sempre calculado a partir da data de admissão
+    total_meses = meses_por_universidade(universidade)
+    return data_adm + relativedelta(months=total_meses)
 
 
 def classificar_status(data_venc: Optional[date], proximos_dias: int) -> str:
@@ -231,8 +231,39 @@ def classificar_status(data_venc: Optional[date], proximos_dias: int) -> str:
     return "OK"
 
 
+# NOVA FUNÇÃO para calcular a próxima renovação
+def calcular_proxima_renovacao(row: pd.Series) -> str:
+    hoje = date.today()
+    
+    # Pega as datas da linha (já convertidas para o tipo 'date')
+    data_adm = row['data_admissao']
+    data_ult_renov = row['data_ult_renovacao']
+    data_venc_final = row['data_vencimento']
+
+    # Se o contrato não tem data de vencimento ou já venceu, não há próxima renovação
+    if pd.isna(data_venc_final) or data_venc_final < hoje:
+        return ""
+
+    # A base para o cálculo é a data de renovação mais recente, ou a data de admissão se for a primeira vez
+    base_date = data_ult_renov if pd.notna(data_ult_renov) else data_adm
+    if pd.isna(base_date):
+        return ""
+
+    # Assumimos um período de renovação padrão de 6 meses
+    intervalo_meses = 6
+    proxima_data_renovacao = base_date + relativedelta(months=intervalo_meses)
+
+    # Se a próxima renovação calculada for posterior ao vencimento final do contrato, significa que o contrato termina
+    if proxima_data_renovacao > data_venc_final:
+        return "Término do Contrato"
+    else:
+        return proxima_data_renovacao.strftime("%d.%m.%Y")
+
+
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
     df_export = df.copy()
+    if 'data_vencimento_obj' in df_export.columns:
+        df_export.drop(columns=['data_vencimento_obj'], inplace=True)
     df_export['data_vencimento_obj'] = pd.to_datetime(df_export['data_vencimento'], dayfirst=True, errors='coerce')
     df_export.sort_values("data_vencimento_obj", inplace=True, na_position='first')
     df_export.drop(columns=['data_vencimento_obj'], inplace=True)
@@ -307,16 +338,26 @@ def main():
     ])
 
     # ==========================
-    # Dashboard
+    # Dashboard (SEÇÃO ATUALIZADA)
     # ==========================
     with tab_dash:
         df = list_estagiarios_df()
         if df.empty:
             st.info("Nenhum estagiário cadastrado ainda.")
         else:
-            df["status"] = df["data_vencimento"].apply(
-                lambda d: classificar_status(pd.to_datetime(d, dayfirst=True, errors='coerce').date(), proximos_dias) if d else "SEM DATA"
+            # --- LÓGICA DE CÁLCULO DAS COLUNAS ---
+            # Converte as colunas de data para o formato de data para cálculos
+            df_calc = df.copy()
+            for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
+                df_calc[col] = pd.to_datetime(df_calc[col], dayfirst=True, errors='coerce').dt.date
+
+            # Adiciona as colunas calculadas ao DataFrame principal
+            df["status"] = df_calc["data_vencimento"].apply(
+                lambda d: classificar_status(d, proximos_dias)
             )
+            df["Próxima_renovação"] = df_calc.apply(calcular_proxima_renovacao, axis=1)
+            
+            # --- MÉTRICAS ---
             total = len(df)
             ok = (df["status"] == "OK").sum()
             prox = (df["status"] == "Venc.Proximo").sum()
@@ -332,6 +373,7 @@ def main():
             st.divider()
             st.subheader("Consulta Rápida de Estagiários")
             
+            # --- FILTROS ---
             filtro_status = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
             filtro_nome = st.text_input("Buscar por Nome do Estagiário")
 
@@ -341,6 +383,7 @@ def main():
             if filtro_nome.strip():
                 df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
 
+            # --- EXIBIÇÃO DA TABELA ---
             if df_view.empty:
                 st.warning("Nenhum registro encontrado para os filtros selecionados.")
             else:
@@ -353,7 +396,7 @@ def main():
                 )
 
     # ==========================
-    # Cadastro/Editar (SEÇÃO CORRIGIDA)
+    # Cadastro/Editar
     # ==========================
     with tab_cad:
         st.subheader("Gerenciar Cadastro de Estagiário")
@@ -411,7 +454,6 @@ def main():
                 if not resultado.empty:
                     est_selecionado = resultado.iloc[0]
 
-            # CORREÇÃO DO ERRO: usar "is not None" para checar a Series do pandas
             nome_default = est_selecionado["nome"] if est_selecionado is not None else ""
             uni_default_val = est_selecionado["universidade"] if est_selecionado is not None else ""
             data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_admissao"] else None
@@ -460,7 +502,6 @@ def main():
                     if not nome.strip() or not universidade_final.strip() or not data_adm:
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     else:
-                        # CONVERSÃO PARA MAIÚSCULAS
                         nome_upper = nome.strip().upper()
                         universidade_upper = universidade_final.strip().upper()
                         obs_upper = obs.strip().upper()
@@ -524,40 +565,4 @@ def main():
                 else:
                     st.warning("Nenhuma regra cadastrada para editar.")
 
-    # ==========================
-    # Import / Export
-    # ==========================
-    with tab_io:
-        st.subheader("Importar / Exportar Dados")
-        st.info("Para importar, o arquivo Excel deve conter as colunas: 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao' (opcional), 'obs' (opcional).")
-        arquivo = st.file_uploader("Importar de um arquivo Excel (.xlsx)", type=["xlsx"])
-        if arquivo:
-            df_import = pd.read_excel(arquivo)
-            count = 0
-            with st.spinner("Importando dados..."):
-                for _, row in df_import.iterrows():
-                    try:
-                        nome = str(row.get("nome","")).strip().upper()
-                        universidade = str(row.get("universidade","")).strip().upper()
-                        data_adm = pd.to_datetime(row.get("data_admissao")).date()
-                        data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
-                        obs = str(row.get("obs","")).strip().upper()
-                        if nome and universidade and data_adm:
-                            data_venc = calcular_vencimento(universidade, data_adm, data_renov)
-                            insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
-                            count += 1
-                    except Exception as e:
-                        st.warning(f"Erro ao importar a linha com nome '{nome}': {e}")
-                        continue
-            st.success(f"{count} estagiários importados com sucesso!")
-        st.divider()
-        df_export = list_estagiarios_df()
-        st.download_button(
-            "📥 Exportar Todos os Dados para Excel",
-            exportar_para_excel_bytes(df_export),
-            file_name="estagiarios_export_completo.xlsx"
-        )
-
-
-if __name__ == "__main__":
-    main()
+    #
