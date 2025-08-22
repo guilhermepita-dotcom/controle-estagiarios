@@ -8,7 +8,6 @@ import sqlite3
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 from PIL import Image
-from streamlit_option_menu import option_menu
 
 # ==========================
 # Configurações e Constantes
@@ -79,7 +78,6 @@ def load_custom_css():
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
                 --text-color: #EAEAEA;
-                --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -89,7 +87,7 @@ def load_custom_css():
             }
             
             .main > div { background-color: var(--background-color); }
-            [data-testid="stSidebar"] { background-color: var(--secondary-background-color); } /* Mantém a cor, mas não será usada */
+            [data-testid="stSidebar"] { background-color: var(--secondary-background-color); border-right: 1px solid #333; }
             
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
             h1 { color: var(--primary-color) !important; }
@@ -111,14 +109,21 @@ def load_custom_css():
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
             .stButton > button[kind="primary"] {
-                background-color: var(--primary-color);
-                border-color: var(--primary-color);
+                background-color: #D9534F;
+                border-color: #D9534F;
             }
             .stButton > button[kind="primary"]:hover {
                 background-color: transparent;
-                color: var(--primary-color);
+                color: #D9534F;
             }
 
+            [data-baseweb="tab"][aria-selected="true"] {
+                background-color: transparent;
+                border-bottom: 3px solid var(--primary-color);
+            }
+            [data-baseweb="tab"] {
+                background-color: var(--secondary-background-color);
+            }
             [data-testid="stMetric"] {
                 background-color: var(--secondary-background-color);
                 border-radius: 10px;
@@ -133,11 +138,6 @@ def load_custom_css():
                 padding: 25px;
                 border: 1px solid #333;
             }
-            [data-testid="stExpander"] {
-                background-color: var(--secondary-background-color);
-                border-radius: 8px;
-                border: 1px solid #333;
-            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -150,18 +150,26 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# (O restante das funções de backend permanece o mesmo)
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS estagiarios (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL, data_admissao TEXT NOT NULL, data_ult_renovacao TEXT, obs TEXT, data_vencimento TEXT)")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS estagiarios (
+            id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL,
+            data_admissao TEXT NOT NULL, data_ult_renovacao TEXT,
+            obs TEXT, data_vencimento TEXT
+        )
+    """)
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    
     c.execute("SELECT value FROM config WHERE key='regras_iniciadas'")
-    if not c.fetchone():
+    regras_iniciadas = c.fetchone()
+    if not regras_iniciadas:
         for kw, meses in DEFAULT_REGRAS:
             c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
         c.execute("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
+
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
     conn.commit()
@@ -178,6 +186,9 @@ def set_config(key: str, value: str):
     c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
     conn.commit()
 
+# ==========================
+# Funções de Lógica e Auxiliares
+# ==========================
 def list_regras() -> pd.DataFrame:
     return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
 
@@ -295,6 +306,7 @@ def main():
     load_custom_css()
     init_db()
 
+    # Layout do Cabeçalho
     c1, c2 = st.columns([1, 5], vertical_alignment="center")
     with c1:
         if os.path.exists(LOGO_FILE):
@@ -302,69 +314,40 @@ def main():
     with c2:
         st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
-    
-    with st.expander("🔑 Área Administrativa"):
-        if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
-        admin_password = get_config("admin_password")
-        
-        if not st.session_state.admin_logged_in:
-            admin_pw_input = st.text_input("Senha", type="password", key="admin_pw_input", label_visibility="collapsed", placeholder="Senha de Administrador")
-            if st.button("Entrar"):
-                if admin_pw_input == admin_password:
-                    st.session_state.admin_logged_in = True
-                    st.rerun()
-                elif admin_pw_input:
-                    st.error("Senha incorreta.")
-        
-        if st.session_state.admin_logged_in:
-            st.success("Acesso liberado!")
-            st.subheader("Backup do Banco de Dados")
-            if os.path.exists(DB_FILE):
-                with open(DB_FILE, "rb") as f:
-                    db_bytes = f.read()
-                st.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
-            if st.button("Sair"):
-                st.session_state.admin_logged_in = False
+    st.divider()
+
+    # Barra Lateral
+    proximos_dias_input = st.sidebar.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
+    set_config("proximos_dias", str(proximos_dias_input))
+    st.sidebar.divider()
+    st.sidebar.title("Área Administrativa")
+    if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
+    admin_password = get_config("admin_password")
+    if not st.session_state.admin_logged_in:
+        admin_pw_input = st.sidebar.text_input("Senha", type="password", key="admin_pw_input", label_visibility="collapsed", placeholder="Senha de Administrador")
+        if st.sidebar.button("Entrar"):
+            if admin_pw_input == admin_password:
+                st.session_state.admin_logged_in = True
                 st.rerun()
+            elif admin_pw_input:
+                st.sidebar.error("Senha incorreta.")
+    if st.session_state.admin_logged_in:
+        st.sidebar.success("Acesso liberado!")
+        if st.sidebar.button("Sair"):
+            st.session_state.admin_logged_in = False
+            st.rerun()
+        st.sidebar.subheader("Backup do Banco de Dados")
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "rb") as f:
+                db_bytes = f.read()
+            st.sidebar.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
 
-    selected = option_menu(
-        menu_title=None,
-        options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export"],
-        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill'],
-        menu_icon="cast", 
-        default_index=0,
-        orientation="horizontal",
-        styles={
-            "container": {"padding": "0!important", "background-color": "#212121"},
-            "icon": {"color": "#E2A144", "font-size": "20px"},
-            "nav-link": {
-                "font-size": "16px",
-                "text-align": "center",
-                "margin":"0px",
-                "padding-bottom": "10px",
-                "color": "#888",
-                "border-bottom": "2px solid transparent",
-                "transition": "color 0.3s, border-bottom 0.3s",
-            },
-            "nav-link-selected": {
-                "background-color": "transparent",
-                "color": "#E2A144",
-                "border-bottom": "2px solid #E2A144",
-                "font-weight": "600",
-            },
-        }
-    )
-    
-    if selected == "Dashboard":
+    # Abas
+    tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
+
+    with tab_dash:
         df = list_estagiarios_df()
-        
-        c_dash1, c_dash2 = st.columns([3, 1])
-        with c_dash1:
-            st.subheader("📊 Métricas Gerais")
-        with c_dash2:
-            proximos_dias_input = st.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1, key="proximos_dias")
-            set_config("proximos_dias", str(proximos_dias_input))
-
+        st.subheader("📊 Métricas Gerais")
         if df.empty:
             st.info("Nenhum estagiário cadastrado para exibir métricas.")
         else:
@@ -375,17 +358,16 @@ def main():
             c2.metric("✅ Contratos OK", ok)
             c3.metric("⚠️ Vencimentos Próximos", prox)
             c4.metric("⛔ Contratos Vencidos", venc)
-        
+            
+            st.subheader("🎓 Estagiários por Universidade")
+            st.bar_chart(df['universidade'].value_counts())
+
         st.subheader("📋 Consulta de Estagiários")
         if df.empty:
             st.info("Nenhum estagiário cadastrado ainda.")
         else:
-            filtros_c1, filtros_c2 = st.columns(2)
-            with filtros_c1:
-                filtro_status = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
-            with filtros_c2:
-                filtro_nome = st.text_input("🔎 Buscar por Nome do Estagiário")
-
+            filtro_status = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
+            filtro_nome = st.text_input("🔎 Buscar por Nome do Estagiário")
             df_view = df.copy()
             if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
             if filtro_nome.strip(): df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
@@ -398,12 +380,13 @@ def main():
                 st.dataframe(df_view, use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
-    if selected == "Cadastro/Editar":
+    with tab_cad:
         st.subheader("Gerenciar Cadastro de Estagiário")
         
         if 'form_mode' not in st.session_state: st.session_state.form_mode = None
         if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
         if 'message' not in st.session_state: st.session_state.message = None
+        if 'cadastro_universidade' not in st.session_state: st.session_state.cadastro_universidade = None
         if 'confirm_delete' not in st.session_state: st.session_state.confirm_delete = None
 
         if st.session_state.message:
@@ -413,10 +396,12 @@ def main():
         if st.session_state.confirm_delete:
             st.warning(f"Tem certeza que deseja excluir o estagiário **{st.session_state.confirm_delete['name']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
-            if col1_conf.button("SIM, EXCLUIR"):
+            if col1_conf.button("SIM, EXCLUIR", type="primary"):
                 delete_estagiario(st.session_state.confirm_delete['id'])
                 st.session_state.message = {'text': f"Estagiário {st.session_state.confirm_delete['name']} excluído com sucesso!", 'type': 'success'}
-                st.session_state.confirm_delete, st.session_state.form_mode, st.session_state.est_selecionado_id = None, None, None
+                st.session_state.confirm_delete = None
+                st.session_state.form_mode = None
+                st.session_state.est_selecionado_id = None
                 st.rerun()
             if col2_conf.button("NÃO, CANCELAR"):
                 st.session_state.confirm_delete = None
@@ -426,6 +411,7 @@ def main():
         if c1.button("➕ Novo Cadastro", disabled=bool(st.session_state.confirm_delete)):
             st.session_state.form_mode = 'new'
             st.session_state.est_selecionado_id = None
+            st.session_state.cadastro_universidade = None
             st.rerun()
 
         df_estagiarios = list_estagiarios_df()
@@ -437,29 +423,36 @@ def main():
             if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
 
         nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
-        st.divider()
+        st.markdown("---")
 
-        if nome_selecionado and not st.session_state.confirm_delete:
+        if nome_selecionado:
             id_novo = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
             if st.session_state.est_selecionado_id != id_novo:
-                st.session_state.est_selecionado_id, st.session_state.form_mode = id_novo, 'edit'
+                st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = id_novo, 'edit', None
                 st.rerun()
         elif st.session_state.est_selecionado_id is not None and not nome_selecionado:
-             st.session_state.est_selecionado_id, st.session_state.form_mode = None, None
+             st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = None, None, None
              st.rerun()
 
-        if st.session_state.form_mode in ['new', 'edit'] and not st.session_state.confirm_delete:
+        if st.session_state.form_mode in ['new', 'edit']:
             est_selecionado_dict = None
-            if st.session_state.form_mode == 'edit' and st.session_state.est_selecionado_id and not df_estagiarios.empty:
-                resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
-                if not resultado.empty: est_selecionado_dict = resultado.iloc[0].to_dict()
+            universidade_para_form = st.session_state.cadastro_universidade
+            
+            if st.session_state.form_mode == 'edit':
+                if st.session_state.est_selecionado_id and not df_estagiarios.empty:
+                    resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
+                    if not resultado.empty: 
+                        est_selecionado_dict = resultado.iloc[0].to_dict()
+                        universidade_para_form = est_selecionado_dict["universidade"]
 
             with st.form("form_cadastro"):
-                if st.session_state.form_mode == 'new': st.subheader("Novo Cadastro de Estagiário")
-                elif est_selecionado_dict: st.subheader(f"Editando: {est_selecionado_dict['nome']}")
-                
+                if st.session_state.form_mode == 'new': 
+                    st.subheader("Novo Cadastro de Estagiário")
+                elif est_selecionado_dict: 
+                    st.subheader(f"Editando: {est_selecionado_dict['nome']}")
+
                 nome_default = est_selecionado_dict["nome"] if est_selecionado_dict else ""
-                uni_default = est_selecionado_dict.get("universidade") if est_selecionado_dict else None
+                uni_default = est_selecionado_dict["universidade"] if est_selecionado_dict else None
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else 0
                 
                 nome = st.text_input("Nome*", value=nome_default)
@@ -500,7 +493,7 @@ def main():
                         elif est_selecionado_dict:
                             update_estagiario(est_selecionado_dict["id"], nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
                             st.session_state.message = {'text': f"Estagiário {nome_upper} atualizado!", 'type': 'success'}
-                        st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
+                        st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
                     st.rerun()
 
                 if delete and est_selecionado_dict:
@@ -508,12 +501,12 @@ def main():
                     st.rerun()
 
                 if cancelar:
-                    st.session_state.form_mode, st.session_state.est_selecionado_id = None, None
+                    st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
                     st.rerun()
 
-    if selected == "Regras":
+    with tab_regras:
         st.subheader("Gerenciar Regras de Contrato")
-        st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses).")
+        st.info("Adicione, edite ou exclua as regras de duração de contrato para cada universidade.")
 
         if 'message_rule' not in st.session_state: st.session_state.message_rule = None
         if 'confirm_delete_rule' not in st.session_state: st.session_state.confirm_delete_rule = None
@@ -525,7 +518,7 @@ def main():
         if st.session_state.confirm_delete_rule:
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
-            if col1_conf.button("SIM, EXCLUIR REGRA"):
+            if col1_conf.button("SIM, EXCLUIR REGRA", type="primary"):
                 delete_regra(int(st.session_state.confirm_delete_rule['id']))
                 st.session_state.message_rule = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
@@ -537,9 +530,10 @@ def main():
         else:
             df_regras = list_regras()
             if df_regras.empty:
-                st.info("Nenhuma regra cadastrada. Universidades sem regra específica usarão o padrão de 6 meses.")
+                st.info("Nenhuma regra cadastrada. Universidades sem regra usarão o padrão de 6 meses.")
             else:
-                st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Meses"}))
+                df_regras_display = df_regras.rename(columns={"id": "ID", "keyword": "Universidade", "meses": "Meses"})
+                st.table(df_regras_display)
             st.divider()
 
             c1, c2 = st.columns(2)
@@ -565,7 +559,7 @@ def main():
                     if not df_regras.empty:
                         opcoes = {f"{r['id']} - {r['keyword']}": r for _, r in df_regras.iterrows()}
                         regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
-                        delete_button = st.form_submit_button("🗑️ Excluir")
+                        delete_button = st.form_submit_button("🗑️ Excluir Regra Selecionada")
                         if delete_button and regra_para_deletar_str:
                             regra_selecionada = opcoes[regra_para_deletar_str]
                             st.session_state.confirm_delete_rule = {'id': regra_selecionada['id'], 'keyword': regra_selecionada['keyword']}
@@ -574,7 +568,7 @@ def main():
                         st.info("Nenhuma regra para excluir.")
                         st.form_submit_button("🗑️ Excluir", disabled=True)
 
-    if selected == "Import/Export":
+    with tab_io:
         st.subheader("Importar / Exportar Dados")
         st.info("O arquivo Excel deve conter as colunas: 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao' (opcional), 'obs' (opcional).")
         arquivo = st.file_uploader("Importar de um arquivo Excel (.xlsx)", type=["xlsx"])
