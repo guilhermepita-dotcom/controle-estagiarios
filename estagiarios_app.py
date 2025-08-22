@@ -46,7 +46,7 @@ universidades_padrao = [
     "UNESA – Universidade Estácio de Sá",
     "UNIABEU – Centro Universitário ABEU",
     "UNICARIOCA – Centro Universitário Carioca",
-    "UNIFESO – Centro Universitário Serra dos Orgãos",
+    "UNIFESO – Centro Universitário Serra dos Órgãos",
     "UNIG – Universidade Iguaçu",
     "UNIGRANRIO – Universidade do Grande Rio",
     "UNILASALLE-RJ – Centro Universitário La Salle do Rio de Janeiro",
@@ -66,7 +66,7 @@ universidades_padrao = [
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
 # ==========================
-# Banco de Dados (COM LÓGICA DE COMMIT EXPLÍCITO)
+# Banco de Dados
 # ==========================
 def create_connection():
     """Cria e retorna uma conexão com o banco de dados."""
@@ -85,7 +85,6 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
     
-    # VERIFICA SE A TABELA DE REGRAS ESTÁ VAZIA ANTES DE INSERIR OS PADRÕES
     c.execute("SELECT COUNT(*) FROM regras")
     count = c.fetchone()[0]
     if count == 0:
@@ -127,21 +126,18 @@ def meses_por_universidade(universidade: str) -> int:
     uni_up = universidade.upper()
     df_regras = list_regras()
     
-    # Procura por uma correspondência exata primeiro
     for _, row in df_regras.iterrows():
         if row["keyword"] == uni_up:
             return int(row["meses"])
             
-    # Se não encontrar, usa o padrão
     return DEFAULT_DURATION_OTHERS
-
 
 def list_estagiarios_df() -> pd.DataFrame:
     conn = create_connection()
     try:
         df = pd.read_sql_query("SELECT * FROM estagiarios", conn, index_col="id")
     except (pd.io.sql.DatabaseError, ValueError):
-         df = pd.DataFrame()
+         return pd.DataFrame()
     conn.close()
 
     if df.empty:
@@ -357,7 +353,18 @@ def main():
                 df_view = df_view.reindex(columns=colunas_ordenadas)
                 st.dataframe(
                     df_view,
-                    column_config={ "nome": st.column_config.TextColumn(label="Nome", width="large"), "id": "ID", "universidade": "Universidade", "data_admissao": "Admissão", "data_ult_renovacao": "Últ. Renovação", "status": "Status", "ultimo_ano": "Último Ano?", "proxima_renovacao": "Próx. Renovação", "data_vencimento": "Venc. Final", "obs": "Observação" },
+                    column_config={
+                        "id": st.column_config.NumberColumn(label="ID", width="small"),
+                        "nome": st.column_config.TextColumn(label="Nome", width="large"),
+                        "universidade": st.column_config.TextColumn(label="Universidade", width="large"),
+                        "data_admissao": "Admissão",
+                        "data_ult_renovacao": st.column_config.TextColumn(label="Últ. Renovação", width="medium"),
+                        "status": st.column_config.TextColumn(label="Status", width="small"),
+                        "ultimo_ano": st.column_config.TextColumn(label="Último Ano?", width="small"),
+                        "proxima_renovacao": st.column_config.TextColumn(label="Próx. Renovação", width="medium"),
+                        "data_vencimento": "Venc. Final",
+                        "obs": st.column_config.TextColumn(label="Observação", width="large")
+                    },
                     use_container_width=True, hide_index=True
                 )
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
@@ -522,7 +529,16 @@ def main():
         
         else:
             df_regras = list_regras()
-            st.dataframe(df_regras, use_container_width=True, hide_index=True)
+            st.dataframe(
+                df_regras, 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "id": st.column_config.NumberColumn("ID", width="small"),
+                    "keyword": st.column_config.TextColumn("Universidade", width="large"),
+                    "meses": st.column_config.NumberColumn("Meses", width="small")
+                }
+            )
             st.divider()
 
             c1, c2, c3 = st.columns(3)
@@ -532,7 +548,7 @@ def main():
                     universidade_selecionada = st.selectbox("Universidade", options=universidades_padrao, index=None, placeholder="Selecione...")
                     keyword_final = ""
                     if universidade_selecionada == "Outra (cadastrar manualmente)":
-                        keyword_final = st.text_input("Digite a Palavra-chave ou Nome").upper()
+                        keyword_final = st.text_input("Digite o Nome ou Palavra-chave").upper()
                     elif universidade_selecionada:
                         keyword_final = universidade_selecionada.upper()
                     
@@ -540,17 +556,17 @@ def main():
                     add_button = st.form_submit_button("Adicionar")
                     if add_button and keyword_final.strip():
                         add_regra(keyword_final, meses)
-                        st.session_state.message_rule = {'text': f"Regra '{keyword_final}' adicionada!", 'type': 'success'}
+                        st.session_state.message_rule = {'text': f"Regra '{keyword_final}' adicionada/atualizada!", 'type': 'success'}
                         st.rerun()
             with c2:
                 with st.form("form_edit_regra"):
                     st.subheader("Editar Regra")
                     if not df_regras.empty:
-                        id_para_editar = st.selectbox("Selecione o ID", options=df_regras['id'].tolist())
+                        id_para_editar = st.selectbox("Selecione o ID para editar", options=df_regras['id'].tolist())
                         regra_selecionada = df_regras[df_regras['id'] == id_para_editar].iloc[0]
-                        novo_keyword = st.text_input("Novo nome", value=regra_selecionada['keyword']).upper()
+                        novo_keyword = st.text_input("Universidade", value=regra_selecionada['keyword']).upper()
                         novos_meses = st.number_input("Novos meses", min_value=1, max_value=24, value=int(regra_selecionada['meses']), step=1)
-                        update_button = st.form_submit_button("Salvar")
+                        update_button = st.form_submit_button("Salvar Alterações")
                         if update_button and novo_keyword.strip():
                             update_regra(id_para_editar, novo_keyword, novos_meses)
                             st.session_state.message_rule = {'text': f"Regra ID {id_para_editar} atualizada!", 'type': 'success'}
@@ -562,7 +578,7 @@ def main():
                     st.subheader("Excluir Regra")
                     if not df_regras.empty:
                         opcoes = {f"{r['id']} - {r['keyword']}": r for i, r in df_regras.iterrows()}
-                        regra_para_deletar_str = st.selectbox("Selecione a regra", options=opcoes.keys())
+                        regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
                         delete_button = st.form_submit_button("🗑️ Excluir")
                         if delete_button and regra_para_deletar_str:
                             regra_selecionada = opcoes[regra_para_deletar_str]
