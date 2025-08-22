@@ -1,5 +1,8 @@
+# requirements.txt
+
 streamlit
 pandas
 python-dateutil
 Pillow
 openpyxl
+SQLAlchemy
