@@ -282,21 +282,23 @@ def highlight_status_and_year(row):
 def main():
     init_db()
 
-    # --- Layout do Cabeçalho ---
-    col1, col2 = st.columns([1, 4])
-    with col1:
-        if os.path.exists(LOGO_FILE):
+    # --- NOVO: Layout do Cabeçalho Centralizado ---
+    if os.path.exists(LOGO_FILE):
+        # Colunas para centralizar a logo
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col2:
             logo = Image.open(LOGO_FILE)
-            st.image(logo, width=150)
-    with col2:
-        st.markdown(
-            "<h1 style='text-align: left; margin-top: 20px;'>Controle de Contratos de Estagiários</h1>",
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            "<p style='text-align: left; font-size:18px;'>Cadastro, Renovação e Acompanhamento de Vencimentos</p>",
-            unsafe_allow_html=True
-        )
+            st.image(logo, width=200) # AUMENTADO O TAMANHO DA LOGO
+
+    # Títulos centralizados usando st.markdown com HTML
+    st.markdown(
+        "<h1 style='text-align: center;'>Controle de Contratos de Estagiários</h1>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        "<p style='text-align: center; font-size:18px;'>Cadastro, Renovação e Acompanhamento de Vencimentos</p>",
+        unsafe_allow_html=True
+    )
     
     st.divider()
 
@@ -347,7 +349,9 @@ def main():
 
             # Adicionando a coluna de status ao dataframe para visualização e exportação
             df_view['status'] = df['status']
-            st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True)
+            
+            # NOVO: hide_index=True para ocultar a primeira coluna
+            st.dataframe(df_view.style.apply(highlight_status_and_year, axis=1), use_container_width=True, hide_index=True)
 
             st.download_button(
                 "📥 Exportar para Excel",
@@ -367,7 +371,6 @@ def main():
         if 'est_selecionado_id' not in st.session_state:
             st.session_state.est_selecionado_id = None
 
-        # --- Lógica de Busca e Seleção ---
         nomes_estagiarios = [""] + df_estagiarios["nome"].tolist()
         
         nome_atual = ""
@@ -390,23 +393,23 @@ def main():
             st.session_state.est_selecionado_id = id_novo
             st.rerun()
 
-        # --- Carrega os dados do estagiário selecionado ---
         est_selecionado = None
         if st.session_state.est_selecionado_id:
             resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
             if not resultado.empty:
                 est_selecionado = resultado.iloc[0]
 
-        # --- Define os valores padrão para o formulário ---
         nome_default = est_selecionado["nome"] if est_selecionado is not None else ""
         uni_default_val = est_selecionado["universidade"] if est_selecionado is not None else ""
         data_adm_default = pd.to_datetime(est_selecionado["data_admissao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_admissao"] else None
         data_renov_default = pd.to_datetime(est_selecionado["data_ult_renovacao"], dayfirst=True, errors='coerce').date() if est_selecionado is not None and est_selecionado["data_ult_renovacao"] else None
         obs_default = est_selecionado["obs"] if est_selecionado is not None else ""
+        
+        # NOVO: Chave dinâmica para forçar o recarregamento dos widgets
+        form_key_suffix = str(st.session_state.est_selecionado_id) if st.session_state.est_selecionado_id else "new"
 
-        # --- Formulário ---
         with st.form("form_cadastro", clear_on_submit=False):
-            nome = st.text_input("Nome do Estagiário*", value=nome_default)
+            nome = st.text_input("Nome do Estagiário*", value=nome_default, key=f"nome_{form_key_suffix}")
             
             uni_index = 0
             if uni_default_val and uni_default_val in universidades_padrao:
@@ -414,20 +417,21 @@ def main():
             elif uni_default_val:
                 uni_index = len(universidades_padrao) - 1
 
-            universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index)
+            universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key=f"uni_{form_key_suffix}")
             
             universidade_final = universidade_selecionada
             if universidade_selecionada == "Outra (cadastrar manualmente)":
                 universidade_final = st.text_input(
                     "Digite o nome da Universidade*",
-                    value=uni_default_val if uni_default_val not in universidades_padrao else ""
+                    value=uni_default_val if uni_default_val not in universidades_padrao else "",
+                    key=f"uni_outra_{form_key_suffix}"
                 )
 
             c1, c2 = st.columns(2)
-            data_adm = c1.date_input("Data de Admissão*", value=data_adm_default)
-            data_renov = c2.date_input("Data da Última Renovação (se houver)", value=data_renov_default)
+            data_adm = c1.date_input("Data de Admissão*", value=data_adm_default, key=f"dta_adm_{form_key_suffix}")
+            data_renov = c2.date_input("Data da Última Renovação (se houver)", value=data_renov_default, key=f"dta_renov_{form_key_suffix}")
             
-            obs = st.text_area("Observações", value=obs_default, height=100)
+            obs = st.text_area("Observações", value=obs_default, height=100, key=f"obs_{form_key_suffix}")
 
             st.markdown("---")
             col1, col2, col3, col4 = st.columns([2,2,2,2])
