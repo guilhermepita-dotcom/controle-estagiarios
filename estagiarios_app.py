@@ -66,14 +66,17 @@ universidades_padrao = [
 st.set_page_config(page_title="Controle de Estagiários", layout="wide")
 
 # ==========================
-# Banco de Dados
+# Banco de Dados (NOVO MÉTODO DE CONEXÃO ÚNICA)
 # ==========================
-def create_connection():
-    """Cria e retorna uma conexão com o banco de dados."""
-    return sqlite3.connect(DB_FILE, check_same_thread=False)
+@st.cache_resource
+def get_db_connection():
+    """Cria e gerencia uma conexão única com o banco de dados."""
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def init_db():
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS estagiarios (
@@ -85,45 +88,37 @@ def init_db():
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
     
-    # VERIFICA SE AS REGRAS PADRÃO JÁ FORAM INSERIDAS ALGUMA VEZ
     c.execute("SELECT value FROM config WHERE key='regras_iniciadas'")
     regras_iniciadas = c.fetchone()
     
     if not regras_iniciadas:
         for kw, meses in DEFAULT_REGRAS:
-            c.execute("INSERT INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
-        # Adiciona a "flag" para não inserir novamente no futuro
-        c.execute("INSERT INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
+            c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
+        c.execute("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
 
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
     
     conn.commit()
-    conn.close()
 
 def get_config(key: str, default: Optional[str] = None) -> str:
-    conn = create_connection()
-    conn.row_factory = sqlite3.Row
+    conn = get_db_connection()
     c = conn.cursor()
     row = c.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
-    conn.close()
     return row['value'] if row else (default if default is not None else "")
 
 def set_config(key: str, value: str):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT INTO config(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (key, value))
     conn.commit()
-    conn.close()
 
 # ==========================
 # Funções de Lógica e Auxiliares
 # ==========================
 def list_regras() -> pd.DataFrame:
-    conn = create_connection()
-    df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
-    conn.close()
-    return df
+    conn = get_db_connection()
+    return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
 
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
@@ -137,12 +132,11 @@ def meses_por_universidade(universidade: str) -> int:
     return DEFAULT_DURATION_OTHERS
 
 def list_estagiarios_df() -> pd.DataFrame:
-    conn = create_connection()
+    conn = get_db_connection()
     try:
         df = pd.read_sql_query("SELECT * FROM estagiarios", conn, index_col="id")
     except (pd.io.sql.DatabaseError, ValueError):
          return pd.DataFrame()
-    conn.close()
 
     if df.empty:
         return pd.DataFrame(columns=['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'obs', 'data_vencimento'])
@@ -164,52 +158,46 @@ def list_estagiarios_df() -> pd.DataFrame:
     return df
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute(
         "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)",
         (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
     )
     conn.commit()
-    conn.close()
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute(
         "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?",
         (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
     )
     conn.commit()
-    conn.close()
 
 def delete_estagiario(est_id: int):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     conn.commit()
-    conn.close()
 
 def add_regra(keyword: str, meses: int):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     conn.commit()
-    conn.close()
 
 def update_regra(regra_id: int, keyword: str, meses: int):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
     conn.commit()
-    conn.close()
 
 def delete_regra(regra_id: int):
-    conn = create_connection()
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
     conn.commit()
-    conn.close()
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
@@ -328,6 +316,9 @@ def main():
 
     tab_dash, tab_cad, tab_regras, tab_io = st.tabs(["📊 Dashboard", "📝 Cadastro/Editar", "⚙️ Regras", "📥 Import/Export"])
 
+    # (O código das abas não precisa de alteração, pois as mudanças foram nas funções de backend)
+    # ... O código das abas (with tab_dash:, with tab_cad:, etc.) permanece o mesmo da versão anterior.
+
     with tab_dash:
         df = list_estagiarios_df()
         if df.empty:
@@ -357,18 +348,7 @@ def main():
                 df_view = df_view.reindex(columns=colunas_ordenadas)
                 st.dataframe(
                     df_view,
-                    column_config={
-                        "id": st.column_config.NumberColumn(label="ID", width="small"),
-                        "nome": st.column_config.TextColumn(label="Nome", width="large"),
-                        "universidade": st.column_config.TextColumn(label="Universidade", width="large"),
-                        "data_admissao": "Admissão",
-                        "data_ult_renovacao": st.column_config.TextColumn(label="Últ. Renovação", width="medium"),
-                        "status": st.column_config.TextColumn(label="Status", width="small"),
-                        "ultimo_ano": st.column_config.TextColumn(label="Último Ano?", width="small"),
-                        "proxima_renovacao": st.column_config.TextColumn(label="Próx. Renovação", width="medium"),
-                        "data_vencimento": "Venc. Final",
-                        "obs": st.column_config.TextColumn(label="Observação", width="large")
-                    },
+                    column_config={ "nome": st.column_config.TextColumn(label="Nome", width="large"), "id": "ID", "universidade": "Universidade", "data_admissao": "Admissão", "data_ult_renovacao": "Últ. Renovação", "status": "Status", "ultimo_ano": "Último Ano?", "proxima_renovacao": "Próx. Renovação", "data_vencimento": "Venc. Final", "obs": "Observação" },
                     use_container_width=True, hide_index=True
                 )
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
