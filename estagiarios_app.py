@@ -288,7 +288,7 @@ def main():
     with col1:
         if os.path.exists(LOGO_FILE):
             logo = Image.open(LOGO_FILE)
-            st.image(logo, width=200)
+            st.image(logo, width=300)
 
     with col2:
         st.markdown(
@@ -546,3 +546,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
