@@ -142,6 +142,15 @@ def load_custom_css():
             li[data-testid="stMenuIIsHorizontal"] > a:hover {
                 color: var(--primary-color) !important;
             }
+
+            /* Centraliza o texto em colunas específicas da tabela */
+            div[data-testid="stDataFrame"] table td:nth-child(1), /* ID */
+            div[data-testid="stDataFrame"] table td:nth-child(4), /* Data Admissão */
+            div[data-testid="stDataFrame"] table td:nth-child(5), /* Renovado em */
+            div[data-testid="stDataFrame"] table td:nth-child(8), /* Próxima Renovação */
+            div[data-testid="stDataFrame"] table td:nth-child(9) { /* Termino de Contrato */
+                text-align: center;
+            }
         </style>
     """, unsafe_allow_html=True)
 
@@ -346,7 +355,7 @@ def main():
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
         with c_dash1:
-            st.subheader("📊 Métricas Gerais")
+            st.subheader("Visão Geral")
         with c_dash2:
             proximos_dias_input = st.number_input("'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
             set_config("proximos_dias", str(proximos_dias_input))
@@ -382,7 +391,17 @@ def main():
                 df_view["proxima_renovacao"] = df_view.apply(calcular_proxima_renovacao, axis=1)
                 colunas_ordenadas = ['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'status', 'ultimo_ano', 'proxima_renovacao', 'data_vencimento', 'obs']
                 df_view = df_view.reindex(columns=colunas_ordenadas)
-                st.dataframe(df_view, use_container_width=True, hide_index=True)
+                st.dataframe(
+                    df_view,
+                    column_config={
+                        "id": "ID", "nome": "Nome", "universidade": "Universidade",
+                        "data_admissao": "Data Admissão", "data_ult_renovacao": "Renovado em:",
+                        "status": "Status", "ultimo_ano": "Ultimo Ano?",
+                        "proxima_renovacao": "Proxima Renovação", "data_vencimento": "Termino de Contrato",
+                        "obs": "Observação"
+                    },
+                    use_container_width=True, hide_index=True
+                )
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
     if selected == "Cadastro/Editar":
@@ -650,3 +669,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+                                        
