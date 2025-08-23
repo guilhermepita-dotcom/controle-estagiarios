@@ -396,7 +396,6 @@ def main():
     if selected == "Cadastro":
         st.subheader("Gerenciar Cadastro de Estagiário")
         
-        # Sub-menu para a página de cadastro
         sub_selected = option_menu(
             menu_title=None,
             options=["➕ Novo Estagiário", "🔎 Consultar / Editar"],
