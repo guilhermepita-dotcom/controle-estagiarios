@@ -93,17 +93,16 @@ def load_custom_css():
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
             h1 { color: var(--primary-color) !important; }
 
-            /* NOVO ESTILO DE BOTÃO PADRONIZADO */
             .stButton > button {
-                background-color: transparent; /* Fundo transparente */
-                color: var(--primary-color); /* Texto na cor coral */
+                background-color: transparent;
+                color: var(--primary-color);
                 border-radius: 8px;
-                border: 2px solid var(--primary-color); /* Borda na cor coral */
+                border: 2px solid var(--primary-color);
                 font-weight: 600;
                 transition: all 0.2s ease-in-out;
                 padding: 8px 16px;
             }
-            .stButton > button:hover { /* Efeito hover preenchido */
+            .stButton > button:hover {
                 background-color: var(--primary-color);
                 color: #FFFFFF;
             }
@@ -131,12 +130,10 @@ def load_custom_css():
                 border: 1px solid #333;
             }
             
-            /* Efeito de hover para o texto do menu */
             li[data-testid="stMenuIIsHorizontal"] > a:hover {
                 color: var(--primary-color) !important;
             }
 
-            /* Centraliza o texto em colunas específicas da tabela */
             div[data-testid="stDataFrame"] table td:nth-child(1), /* ID */
             div[data-testid="stDataFrame"] table td:nth-child(4), /* Data Admissão */
             div[data-testid="stDataFrame"] table td:nth-child(5), /* Renovado em */
@@ -323,7 +320,7 @@ def main():
     
     selected = option_menu(
         menu_title=None,
-        options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export", "Área Administrativa"],
+        options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
         icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
         menu_icon="cast", 
         default_index=0,
@@ -396,76 +393,37 @@ def main():
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
-    if selected == "Cadastro/Editar":
+    if selected == "Cadastro":
         st.subheader("Gerenciar Cadastro de Estagiário")
         
-        if 'form_mode' not in st.session_state: st.session_state.form_mode = None
-        if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
-        if 'message' not in st.session_state: st.session_state.message = None
-        if 'confirm_delete' not in st.session_state: st.session_state.confirm_delete = None
-        if 'cadastro_universidade' not in st.session_state: st.session_state.cadastro_universidade = None
+        # Sub-menu para a página de cadastro
+        sub_selected = option_menu(
+            menu_title=None,
+            options=["➕ Novo Estagiário", "🔎 Consultar / Editar"],
+            icons=['person-plus-fill', 'search'],
+            orientation="horizontal",
+            styles={
+                "container": {"padding": "0!important", "background-color": "transparent"},
+                "nav-link-selected": {"background-color": "#333"},
+            }
+        )
+        st.divider()
 
+        if 'message' not in st.session_state: st.session_state.message = None
         if st.session_state.message:
             show_message(st.session_state.message)
             st.session_state.message = None
-        
-        if st.session_state.confirm_delete:
-            st.warning(f"Tem certeza que deseja excluir o estagiário **{st.session_state.confirm_delete['name']}**?")
-            col1_conf, col2_conf, _ = st.columns([1,1,4])
-            if col1_conf.button("SIM, EXCLUIR"):
-                delete_estagiario(st.session_state.confirm_delete['id'])
-                st.session_state.message = {'text': f"Estagiário {st.session_state.confirm_delete['name']} excluído com sucesso!", 'type': 'success'}
-                st.session_state.confirm_delete, st.session_state.form_mode, st.session_state.est_selecionado_id = None, None, None
-                st.rerun()
-            if col2_conf.button("NÃO, CANCELAR"):
-                st.session_state.confirm_delete = None
-                st.rerun()
 
-        c1, c2 = st.columns([0.25, 1]) # Ajuste para alinhar
-        with c1:
-            if st.button("➕ Novo Cadastro", disabled=bool(st.session_state.confirm_delete)):
-                st.session_state.form_mode = 'new'
-                st.session_state.est_selecionado_id = None
-                st.session_state.cadastro_universidade = None
-                st.rerun()
+        if sub_selected == "➕ Novo Estagiário":
+            if 'cadastro_universidade' not in st.session_state: st.session_state.cadastro_universidade = None
 
-        df_estagiarios = list_estagiarios_df()
-        nomes_estagiarios = [""] + df_estagiarios["nome"].tolist() if not df_estagiarios.empty else [""]
-        
-        nome_atual = ""
-        if st.session_state.est_selecionado_id and not df_estagiarios.empty:
-            nome_filtrado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
-            if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
-
-        with c2:
-            nome_selecionado = st.selectbox("🔎 Buscar e Selecionar Estagiário", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
-        st.divider()
-
-        if nome_selecionado and not st.session_state.confirm_delete:
-            id_novo = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
-            if st.session_state.est_selecionado_id != id_novo:
-                st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = id_novo, 'edit', None
-                st.rerun()
-        elif st.session_state.est_selecionado_id is not None and not nome_selecionado:
-             st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = None, None, None
-             st.rerun()
-
-        universidade_para_form = None
-        if st.session_state.form_mode == 'edit':
-             if st.session_state.est_selecionado_id and not df_estagiarios.empty:
-                 selecionado_df = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
-                 if not selecionado_df.empty:
-                     universidade_para_form = selecionado_df.iloc[0]['universidade']
-        
-        elif st.session_state.form_mode == 'new':
             if not st.session_state.cadastro_universidade:
                 st.subheader("Passo 1: Selecione a Universidade")
                 uni_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...")
                 
-                col1_passo1, col2_passo1 = st.columns([1, 5])
+                col1_passo1, _ = st.columns([1, 5])
                 with col1_passo1:
                     if st.button("Cancelar"):
-                        st.session_state.form_mode = None
                         st.session_state.cadastro_universidade = None
                         st.rerun()
 
@@ -481,70 +439,105 @@ def main():
                     st.session_state.cadastro_universidade = uni_selecionada
                     st.rerun()
             else:
-                 universidade_para_form = st.session_state.cadastro_universidade
-        
-        if universidade_para_form and not st.session_state.confirm_delete:
-            est_selecionado_dict = None
-            if st.session_state.form_mode == 'edit' and st.session_state.est_selecionado_id and not df_estagiarios.empty:
-                resultado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
-                if not resultado.empty: est_selecionado_dict = resultado.iloc[0].to_dict()
-
-            with st.form("form_cadastro"):
-                if st.session_state.form_mode == 'new': st.subheader(f"Passo 2: Detalhes do Estagiário ({universidade_para_form})")
-                elif est_selecionado_dict: st.subheader(f"Editando: {est_selecionado_dict['nome']}")
-                
-                nome_default = est_selecionado_dict["nome"] if est_selecionado_dict else ""
-                uni_default = est_selecionado_dict.get("universidade") if est_selecionado_dict else universidade_para_form
-                uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else 0
-                
-                nome = st.text_input("Nome*", value=nome_default)
-                universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, disabled=(st.session_state.form_mode == 'new'))
-                universidade_final = universidade_selecionada
-                if universidade_selecionada == "Outra (cadastrar manualmente)":
-                    universidade_final = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "")
-                
-                termo_meses = meses_por_universidade(universidade_final)
-                
-                data_adm_default = pd.to_datetime(est_selecionado_dict.get("data_admissao"), dayfirst=True, errors='coerce').date() if est_selecionado_dict else None
-                data_renov_default = pd.to_datetime(est_selecionado_dict.get("data_ult_renovacao"), dayfirst=True, errors='coerce').date() if est_selecionado_dict and "Contrato" not in str(est_selecionado_dict.get("data_ult_renovacao")) else None
-                obs_default = est_selecionado_dict.get("obs", "") if est_selecionado_dict else ""
-
-                c1_form, c2_form = st.columns(2)
-                data_adm = c1_form.date_input("Data de Admissão*", value=data_adm_default)
-                data_renov = c2_form.date_input("Data da Última Renovação", value=data_renov_default, disabled=(termo_meses >= 24))
-                if termo_meses >= 24:
-                    c2_form.info("Contrato único. Não requer renovação.")
-
-                obs = st.text_area("Observações", value=obs_default, height=100)
-                st.markdown("---")
-                
-                col1_form, col2_form, _, col4_form = st.columns(4)
-                submit = col1_form.form_submit_button("💾 Salvar")
-                delete = col2_form.form_submit_button("🗑️ Excluir", disabled=(st.session_state.form_mode == 'new' or not est_selecionado_dict))
-                cancelar = col4_form.form_submit_button("🧹 Cancelar")
-
-                if submit:
-                    if not nome.strip() or not universidade_final.strip() or not data_adm:
-                        st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
-                    else:
-                        nome_upper, universidade_upper, obs_upper = nome.strip().upper(), universidade_final.strip().upper(), obs.strip().upper()
-                        data_venc = calcular_vencimento_final(data_adm)
-                        if st.session_state.form_mode == 'new':
-                            insert_estagiario(nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
+                with st.form("form_new_cadastro"):
+                    st.subheader(f"Passo 2: Detalhes do Estagiário ({st.session_state.cadastro_universidade})")
+                    nome = st.text_input("Nome*")
+                    termo_meses = meses_por_universidade(st.session_state.cadastro_universidade)
+                    c1, c2 = st.columns(2)
+                    data_adm = c1.date_input("Data de Admissão*")
+                    data_renov = c2.date_input("Data da Última Renovação", disabled=(termo_meses >= 24))
+                    if termo_meses >= 24:
+                        c2.info("Contrato único. Não requer renovação.")
+                    obs = st.text_area("Observações", height=100)
+                    st.markdown("---")
+                    c_submit, c_cancel = st.columns(2)
+                    if c_submit.form_submit_button("💾 Salvar Novo Estagiário"):
+                        if not nome.strip() or not data_adm:
+                            st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
+                        else:
+                            nome_upper, uni_upper, obs_upper = nome.strip().upper(), st.session_state.cadastro_universidade, obs.strip().upper()
+                            data_venc = calcular_vencimento_final(data_adm)
+                            insert_estagiario(nome_upper, uni_upper, data_adm, data_renov, obs_upper, data_venc)
                             st.session_state.message = {'text': f"Estagiário {nome_upper} cadastrado!", 'type': 'success'}
-                        elif est_selecionado_dict:
-                            update_estagiario(est_selecionado_dict["id"], nome_upper, universidade_upper, data_adm, data_renov, obs_upper, data_venc)
+                            st.session_state.cadastro_universidade = None
+                        st.rerun()
+                    if c_cancel.form_submit_button("🧹 Cancelar", type="secondary"):
+                        st.session_state.cadastro_universidade = None
+                        st.rerun()
+
+        if sub_selected == "🔎 Consultar / Editar":
+            if 'est_selecionado_id' not in st.session_state: st.session_state.est_selecionado_id = None
+            if 'confirm_delete' not in st.session_state: st.session_state.confirm_delete = None
+
+            if st.session_state.confirm_delete:
+                st.warning(f"Tem certeza que deseja excluir o estagiário **{st.session_state.confirm_delete['name']}**?")
+                c1_conf, c2_conf, _ = st.columns([1,1,4])
+                if c1_conf.button("SIM, EXCLUIR"):
+                    delete_estagiario(st.session_state.confirm_delete['id'])
+                    st.session_state.message = {'text': f"Estagiário {st.session_state.confirm_delete['name']} excluído!", 'type': 'success'}
+                    st.session_state.confirm_delete, st.session_state.est_selecionado_id = None, None
+                    st.rerun()
+                if c2_conf.button("NÃO, CANCELAR"):
+                    st.session_state.confirm_delete = None
+                    st.rerun()
+
+            df_estagiarios = list_estagiarios_df()
+            nomes_estagiarios = [""] + df_estagiarios["nome"].tolist() if not df_estagiarios.empty else [""]
+            nome_atual = ""
+            if st.session_state.est_selecionado_id and not df_estagiarios.empty:
+                nome_filtrado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
+                if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
+
+            nome_selecionado = st.selectbox("Selecione um estagiário para editar", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
+            st.divider()
+
+            if nome_selecionado and not st.session_state.confirm_delete:
+                id_selecionado = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
+                est_selecionado_dict = df_estagiarios[df_estagiarios['id'] == id_selecionado].iloc[0].to_dict()
+                
+                with st.form("form_edit_cadastro"):
+                    st.subheader(f"Editando: {est_selecionado_dict['nome']}")
+                    nome_default = est_selecionado_dict["nome"]
+                    uni_default = est_selecionado_dict.get("universidade")
+                    uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else 0
+                    
+                    nome = st.text_input("Nome*", value=nome_default)
+                    universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index)
+                    universidade_final = universidade_selecionada
+                    if universidade_selecionada == "Outra (cadastrar manualmente)":
+                        universidade_final = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "")
+                    
+                    termo_meses = meses_por_universidade(universidade_final)
+                    data_adm_default = pd.to_datetime(est_selecionado_dict.get("data_admissao"), dayfirst=True, errors='coerce').date()
+                    data_renov_default = pd.to_datetime(est_selecionado_dict.get("data_ult_renovacao"), dayfirst=True, errors='coerce').date() if "Contrato" not in str(est_selecionado_dict.get("data_ult_renovacao")) else None
+                    obs_default = est_selecionado_dict.get("obs", "")
+
+                    c1, c2 = st.columns(2)
+                    data_adm = c1.date_input("Data de Admissão*", value=data_adm_default)
+                    data_renov = c2.date_input("Data da Última Renovação", value=data_renov_default, disabled=(termo_meses >= 24))
+                    if termo_meses >= 24:
+                        c2.info("Contrato único. Não requer renovação.")
+
+                    obs = st.text_area("Observações", value=obs_default, height=100)
+                    st.markdown("---")
+                    
+                    c_submit, c_delete, c_cancel = st.columns([1,1,2])
+                    if c_submit.form_submit_button("💾 Salvar Alterações"):
+                        if not nome.strip() or not universidade_final.strip() or not data_adm:
+                            st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
+                        else:
+                            nome_upper, uni_upper, obs_upper = nome.strip().upper(), universidade_final.strip().upper(), obs.strip().upper()
+                            data_venc = calcular_vencimento_final(data_adm)
+                            update_estagiario(id_selecionado, nome_upper, uni_upper, data_adm, data_renov, obs_upper, data_venc)
                             st.session_state.message = {'text': f"Estagiário {nome_upper} atualizado!", 'type': 'success'}
-                        st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
-                    st.rerun()
-
-                if delete and est_selecionado_dict:
-                    st.session_state.confirm_delete = {'id': est_selecionado_dict['id'], 'name': est_selecionado_dict['nome']}
-                    st.rerun()
-
-                if cancelar:
-                    st.session_state.form_mode, st.session_state.est_selecionado_id, st.session_state.cadastro_universidade = None, None, None
-                    st.rerun()
+                            st.session_state.est_selecionado_id = None
+                        st.rerun()
+                    if c_delete.form_submit_button("🗑️ Excluir"):
+                        st.session_state.confirm_delete = {'id': id_selecionado, 'name': nome}
+                        st.rerun()
+                    if c_cancel.form_submit_button("🧹 Cancelar Edição"):
+                        st.session_state.est_selecionado_id = None
+                        st.rerun()
 
     if selected == "Regras":
         st.subheader("Gerenciar Regras de Contrato")
