@@ -4,3 +4,4 @@ python-dateutil
 Pillow
 openpyxl
 streamlit-option-menu
+pytz
