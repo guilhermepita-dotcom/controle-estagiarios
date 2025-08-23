@@ -76,10 +76,10 @@ def load_custom_css():
             
             :root {
                 --primary-color: #E2A144;
-                --background-color: #E2A144;
-                --secondary-background-color: #8c8c8b;
-                --text-color: #FFFFFF;
-                --text-color-muted: #E2A144;
+                --background-color: #0F0F0F;
+                --secondary-background-color: #212121;
+                --text-color: #FFFFFF; /* Branco para texto principal */
+                --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -90,9 +90,11 @@ def load_custom_css():
             
             .main > div { background-color: var(--background-color); }
             
-            h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
-            h1 { color: var(--primary-color) !important; }
+            /* Título principal em branco, outros títulos seguem a cor padrão */
+            h1 { color: var(--text-color) !important; }
+            h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
 
+            /* Estilo dos Botões Padronizado */
             .stButton > button {
                 background-color: var(--primary-color);
                 color: #FFFFFF;
@@ -102,24 +104,17 @@ def load_custom_css():
                 transition: all 0.2s ease-in-out;
                 padding: 8px 16px;
             }
-            .stButton > button:hover {
+            .stButton > button:hover { /* Efeito hover invertido */
                 background-color: transparent;
                 color: var(--primary-color);
             }
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
-            .stButton > button[kind="primary"] {
-                background-color: var(--primary-color);
-                border-color: var(--primary-color);
-            }
-            .stButton > button[kind="primary"]:hover {
-                background-color: transparent;
-                color: var(--primary-color);
-            }
 
+            /* Cards de Métricas com transparência */
             [data-testid="stMetric"] {
-                background-color: var(--secondary-background-color);
+                background-color: rgba(33, 33, 33, 0.3); /* Cinza escuro com 30% de opacidade */
                 border-radius: 10px;
                 padding: 20px;
                 border-left: 5px solid var(--primary-color);
@@ -136,20 +131,6 @@ def load_custom_css():
                 background-color: var(--secondary-background-color);
                 border-radius: 8px;
                 border: 1px solid #333;
-            }
-            
-            /* Efeito de hover para o texto do menu */
-            li[data-testid="stMenuIIsHorizontal"] > a:hover {
-                color: var(--primary-color) !important;
-            }
-
-            /* Centraliza o texto em colunas específicas da tabela */
-            div[data-testid="stDataFrame"] table td:nth-child(1), /* ID */
-            div[data-testid="stDataFrame"] table td:nth-child(4), /* Data Admissão */
-            div[data-testid="stDataFrame"] table td:nth-child(5), /* Renovado em */
-            div[data-testid="stDataFrame"] table td:nth-child(8), /* Próxima Renovação */
-            div[data-testid="stDataFrame"] table td:nth-child(9) { /* Termino de Contrato */
-                text-align: center;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -390,7 +371,6 @@ def main():
             else:
                 df_view["proxima_renovacao"] = df_view.apply(calcular_proxima_renovacao, axis=1)
                 
-                # Renomeia colunas para exibição
                 df_display = df_view.rename(columns={
                     'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
                     'data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:',
@@ -669,17 +649,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
