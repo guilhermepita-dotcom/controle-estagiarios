@@ -1,5 +1,5 @@
 import os
-from datetime import date
+from datetime import date, datetime
 from contextlib import contextmanager
 from typing import Optional, Dict, Any
 
@@ -165,6 +165,14 @@ def init_db():
     """)
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT
+        )
+    """)
     
     c.execute("SELECT value FROM config WHERE key='regras_iniciadas'")
     regras_iniciadas = c.fetchone()
@@ -192,6 +200,12 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e CRUD
 # ==========================
+def log_action(action: str, details: str = ""):
+    conn = get_db_connection()
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
+    conn.commit()
+
 def list_regras() -> pd.DataFrame:
     df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
     return df
@@ -227,31 +241,47 @@ def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: 
     conn = get_db_connection()
     conn.execute("INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)", (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None))
     conn.commit()
+    log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     conn = get_db_connection()
     conn.execute("UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?", (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id))
     conn.commit()
+    log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
-def delete_estagiario(est_id: int):
+def delete_estagiario(est_id: int, nome: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     conn.commit()
+    log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
 def add_regra(keyword: str, meses: int):
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     conn.commit()
+    log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
 
-def update_regra(regra_id: int, keyword: str, meses: int):
-    conn = get_db_connection()
-    conn.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
-    conn.commit()
-
-def delete_regra(regra_id: int):
+def delete_regra(regra_id: int, keyword: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
     conn.commit()
+    log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
+
+def list_logs_df(filter_date: Optional[date] = None) -> pd.DataFrame:
+    conn = get_db_connection()
+    query = "SELECT timestamp, action, details FROM logs"
+    params = {}
+    if filter_date:
+        query += " WHERE date(timestamp) = :filter_date"
+        params['filter_date'] = filter_date.strftime('%Y-%m-%d')
+    query += " ORDER BY id DESC LIMIT 50"
+    df = pd.read_sql_query(query, conn, params=params)
+    return df
+
+def exportar_logs_bytes() -> bytes:
+    df = pd.read_sql_query("SELECT timestamp, action, details FROM logs ORDER BY id ASC", get_db_connection())
+    log_string = df.to_string(index=False)
+    return log_string.encode('utf-8')
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
@@ -310,45 +340,37 @@ def main():
     load_custom_css()
     init_db()
 
-    # --- CABEÇALHO COM LOGO E MENU LADO A LADO ---
-    c1, c2 = st.columns([1, 4], vertical_alignment="center")
+    c1, c2 = st.columns([1, 5], vertical_alignment="center")
     with c1:
         if os.path.exists(LOGO_FILE):
             st.image(LOGO_FILE, width=150)
     with c2:
-        selected = option_menu(
-            menu_title=None,
-            options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
-            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
-            menu_icon="cast", 
-            default_index=0,
-            orientation="horizontal",
-            styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
-                "nav-link": {
-                    "font-size": "16px", "text-align": "center", "margin": "0px 10px",
-                    "padding-bottom": "10px", "color": "var(--text-color-muted)",
-                    "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
-                },
-                "nav-link-selected": {
-                    "background-color": "transparent",
-                    "color": "var(--primary-color)",
-                    "border-bottom": "3px solid var(--primary-color)",
-                    "font-weight": "600",
-                },
-            }
-        )
-    st.divider()
+        st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
+        st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
     
-    # Lógica de Reset de Página
-    if 'main_selection' not in st.session_state: st.session_state.main_selection = "Dashboard"
-    if selected != st.session_state.main_selection:
-        st.session_state.main_selection = selected
-        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule']:
-            if key in st.session_state:
-                st.session_state[key] = None
-        st.rerun()
+    selected = option_menu(
+        menu_title=None,
+        options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
+        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+        menu_icon="cast", 
+        default_index=0,
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
+            "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px", "text-align": "center", "margin": "0px",
+                "padding-bottom": "10px", "color": "var(--text-color-muted)",
+                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
+            },
+            "nav-link-selected": {
+                "background-color": "transparent",
+                "color": "var(--primary-color)",
+                "border-bottom": "3px solid var(--primary-color)",
+                "font-weight": "600",
+            },
+        }
+    )
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
@@ -484,7 +506,7 @@ def main():
                 st.warning(f"Tem certeza que deseja excluir o estagiário **{st.session_state.confirm_delete['name']}**?")
                 c1_conf, c2_conf, _ = st.columns([1,1,4])
                 if c1_conf.button("SIM, EXCLUIR"):
-                    delete_estagiario(st.session_state.confirm_delete['id'])
+                    delete_estagiario(st.session_state.confirm_delete['id'], st.session_state.confirm_delete['name'])
                     st.session_state.message = {'text': f"Estagiário {st.session_state.confirm_delete['name']} excluído!", 'type': 'success'}
                     st.session_state.confirm_delete, st.session_state.est_selecionado_id = None, None
                     st.rerun()
@@ -565,7 +587,7 @@ def main():
             st.warning(f"Tem certeza que deseja excluir a regra **{st.session_state.confirm_delete_rule['keyword']}**?")
             col1_conf, col2_conf, _ = st.columns([1,1,4])
             if col1_conf.button("SIM, EXCLUIR REGRA"):
-                delete_regra(int(st.session_state.confirm_delete_rule['id']))
+                delete_regra(int(st.session_state.confirm_delete_rule['id']), st.session_state.confirm_delete_rule['keyword'])
                 st.session_state.message_rule = {'text': f"Regra {st.session_state.confirm_delete_rule['keyword']} excluída com sucesso!", 'type': 'success'}
                 st.session_state.confirm_delete_rule = None
                 st.rerun()
@@ -656,12 +678,29 @@ def main():
         
         if st.session_state.admin_logged_in:
             st.success("Acesso liberado!")
-            st.subheader("Backup do Banco de Dados")
-            if os.path.exists(DB_FILE):
-                with open(DB_FILE, "rb") as f:
-                    db_bytes = f.read()
-                st.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
-            if st.button("Sair"):
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("Backup do Banco de Dados")
+                if os.path.exists(DB_FILE):
+                    with open(DB_FILE, "rb") as f:
+                        db_bytes = f.read()
+                    st.download_button(label="📥 Baixar Backup", data=db_bytes, file_name="backup_estagiarios.db", mime="application/octet-stream")
+
+            with c2:
+                st.subheader("Logs do Sistema")
+                filter_date = st.date_input("Filtrar logs por data:", value=None)
+                logs_df = list_logs_df(filter_date=filter_date)
+                
+                if logs_df.empty:
+                    st.info("Nenhum log encontrado para a data selecionada.")
+                else:
+                    st.dataframe(logs_df, use_container_width=True, hide_index=True)
+                
+                log_bytes = exportar_logs_bytes()
+                st.download_button(label="📥 Baixar Log Completo", data=log_bytes, file_name="log_completo.txt", mime="text/plain")
+
+            if st.button("Sair da Área Admin"):
                 st.session_state.admin_logged_in = False
                 st.rerun()
 
