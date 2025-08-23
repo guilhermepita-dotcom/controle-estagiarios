@@ -13,13 +13,8 @@ from streamlit_option_menu import option_menu
 # ==========================
 # Configurações e Constantes
 # ==========================
-# --- NOVA LÓGICA DE CAMINHOS ---
-# Pega o caminho absoluto da pasta onde o script está rodando
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-# Cria o caminho completo para os arquivos, garantindo que sempre sejam encontrados
-DB_FILE = os.path.join(SCRIPT_DIR, "estagiarios.db")
-LOGO_FILE = os.path.join(SCRIPT_DIR, "logo.png")
-
+DB_FILE = "estagiarios.db"
+LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
 DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
@@ -84,7 +79,7 @@ def load_custom_css():
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
                 --text-color: #EAEAEA;
-                --text-color-muted: #888;
+                --text-color-dark: #0F0F0F;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -319,27 +314,29 @@ def main():
         st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
     
-    selected = option_menu(
-        menu_title=None,
-        options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export", "Área Administrativa"],
-        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
-        menu_icon="cast", 
-        default_index=0,
-        orientation="horizontal",
-        styles={
-            "container": {"padding": "5px !important", "background-color": "#212121", "border-radius": "8px", "margin": "10px 0"},
-            "icon": {"color": "#E2A144", "font-size": "20px"},
-            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "--hover-color": "#333"},
-            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
-        }
-    )
+    _, mid_col, _ = st.columns([1, 3, 1])
+    with mid_col:
+        selected = option_menu(
+            menu_title=None,
+            options=["Dashboard", "Cadastro/Editar", "Regras", "Import/Export", "Área Administrativa"],
+            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+            menu_icon="cast", 
+            default_index=0,
+            orientation="horizontal",
+            styles={
+                "container": {"padding": "5px !important", "background-color": "rgba(255, 255, 255, 0.3)", "border-radius": "8px"},
+                "icon": {"color": "#E2A144", "font-size": "20px"},
+                "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "color": "#0F0F0F", "--hover-color": "#eee"},
+                "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
+            }
+        )
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
         with c_dash1:
             st.subheader("📊 Métricas Gerais")
         with c_dash2:
-            proximos_dias_input = st.number_input("Janela 'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
+            proximos_dias_input = st.number_input("'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
             set_config("proximos_dias", str(proximos_dias_input))
         
         df = list_estagiarios_df()
@@ -584,13 +581,14 @@ def main():
         admin_password = get_config("admin_password")
         
         if not st.session_state.admin_logged_in:
-            admin_pw_input = st.text_input("Senha", type="password", key="admin_pw_input_main", label_visibility="collapsed", placeholder="Senha de Administrador")
-            if st.button("Entrar"):
-                if admin_pw_input == admin_password:
-                    st.session_state.admin_logged_in = True
-                    st.rerun()
-                elif admin_pw_input:
-                    st.error("Senha incorreta.")
+            with st.form("admin_login_form"):
+                st.text_input("Senha", type="password", key="admin_pw_input_main", label_visibility="collapsed", placeholder="Senha de Administrador")
+                if st.form_submit_button("Entrar"):
+                    if st.session_state.admin_pw_input_main == admin_password:
+                        st.session_state.admin_logged_in = True
+                        st.rerun()
+                    else:
+                        st.error("Senha incorreta.")
         
         if st.session_state.admin_logged_in:
             st.success("Acesso liberado!")
