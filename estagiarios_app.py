@@ -79,7 +79,7 @@ def load_custom_css():
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
                 --text-color: #EAEAEA;
-                --text-color-dark: #0F0F0F;
+                --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -136,6 +136,11 @@ def load_custom_css():
                 background-color: var(--secondary-background-color);
                 border-radius: 8px;
                 border: 1px solid #333;
+            }
+            
+            /* Efeito de hover para o texto do menu */
+            li[data-testid="stMenuIIsHorizontal"] > a:hover {
+                color: var(--primary-color) !important;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -322,10 +327,19 @@ def main():
         default_index=0,
         orientation="horizontal",
         styles={
-            "container": {"padding": "5px !important", "background-color": "rgba(255, 255, 255, 0.3)", "border-radius": "8px", "margin": "10px 0"},
-            "icon": {"color": "#E2A144", "font-size": "20px"},
-            "nav-link": {"font-size": "16px", "text-align": "center", "margin":"0px", "color": "#0F0F0F", "--hover-color": "#eee"},
-            "nav-link-selected": {"background-color": "#E2A144", "color": "#0F0F0F", "font-weight": "600"},
+            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
+            "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px", "text-align": "center", "margin": "0px",
+                "padding-bottom": "10px", "color": "var(--text-color-muted)",
+                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
+            },
+            "nav-link-selected": {
+                "background-color": "transparent",
+                "color": "var(--primary-color)",
+                "border-bottom": "3px solid var(--primary-color)",
+                "font-weight": "600",
+            },
         }
     )
     
