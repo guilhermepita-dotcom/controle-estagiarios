@@ -397,7 +397,11 @@ def main():
     if selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
         for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule', 'filtro_status_dash', 'filtro_nome_dash']:
-            if key in st.session_state:
+            if key == 'filtro_status_dash':
+                st.session_state[key] = []
+            elif key == 'filtro_nome_dash':
+                st.session_state[key] = ""
+            else:
                 st.session_state[key] = None
         st.rerun()
     
