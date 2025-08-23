@@ -78,7 +78,7 @@ def load_custom_css():
                 --primary-color: #E2A144;
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
-                --text-color: #FFFFFF; /* Branco para texto principal */
+                --text-color: #EAEAEA;
                 --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
@@ -90,31 +90,29 @@ def load_custom_css():
             
             .main > div { background-color: var(--background-color); }
             
-            /* Título principal em branco, outros títulos seguem a cor padrão */
-            h1 { color: var(--text-color) !important; }
-            h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
+            h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
+            h1 { color: var(--primary-color) !important; }
 
-            /* Estilo dos Botões Padronizado */
+            /* NOVO ESTILO DE BOTÃO PADRONIZADO */
             .stButton > button {
-                background-color: var(--primary-color);
-                color: #FFFFFF;
+                background-color: transparent; /* Fundo transparente */
+                color: var(--primary-color); /* Texto na cor coral */
                 border-radius: 8px;
-                border: 2px solid var(--primary-color);
+                border: 2px solid var(--primary-color); /* Borda na cor coral */
                 font-weight: 600;
                 transition: all 0.2s ease-in-out;
                 padding: 8px 16px;
             }
-            .stButton > button:hover { /* Efeito hover invertido */
-                background-color: transparent;
-                color: var(--primary-color);
+            .stButton > button:hover { /* Efeito hover preenchido */
+                background-color: var(--primary-color);
+                color: #FFFFFF;
             }
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
 
-            /* Cards de Métricas com transparência */
             [data-testid="stMetric"] {
-                background-color: rgba(33, 33, 33, 0.3); /* Cinza escuro com 30% de opacidade */
+                background-color: var(--secondary-background-color);
                 border-radius: 10px;
                 padding: 20px;
                 border-left: 5px solid var(--primary-color);
@@ -131,6 +129,20 @@ def load_custom_css():
                 background-color: var(--secondary-background-color);
                 border-radius: 8px;
                 border: 1px solid #333;
+            }
+            
+            /* Efeito de hover para o texto do menu */
+            li[data-testid="stMenuIIsHorizontal"] > a:hover {
+                color: var(--primary-color) !important;
+            }
+
+            /* Centraliza o texto em colunas específicas da tabela */
+            div[data-testid="stDataFrame"] table td:nth-child(1), /* ID */
+            div[data-testid="stDataFrame"] table td:nth-child(4), /* Data Admissão */
+            div[data-testid="stDataFrame"] table td:nth-child(5), /* Renovado em */
+            div[data-testid="stDataFrame"] table td:nth-child(8), /* Próxima Renovação */
+            div[data-testid="stDataFrame"] table td:nth-child(9) { /* Termino de Contrato */
+                text-align: center;
             }
         </style>
     """, unsafe_allow_html=True)
@@ -409,12 +421,13 @@ def main():
                 st.session_state.confirm_delete = None
                 st.rerun()
 
-        c1, c2 = st.columns([1, 3])
-        if c1.button("➕ Novo Cadastro", disabled=bool(st.session_state.confirm_delete)):
-            st.session_state.form_mode = 'new'
-            st.session_state.est_selecionado_id = None
-            st.session_state.cadastro_universidade = None
-            st.rerun()
+        c1, c2 = st.columns([0.25, 1]) # Ajuste para alinhar
+        with c1:
+            if st.button("➕ Novo Cadastro", disabled=bool(st.session_state.confirm_delete)):
+                st.session_state.form_mode = 'new'
+                st.session_state.est_selecionado_id = None
+                st.session_state.cadastro_universidade = None
+                st.rerun()
 
         df_estagiarios = list_estagiarios_df()
         nomes_estagiarios = [""] + df_estagiarios["nome"].tolist() if not df_estagiarios.empty else [""]
@@ -424,7 +437,8 @@ def main():
             nome_filtrado = df_estagiarios[df_estagiarios['id'] == st.session_state.est_selecionado_id]
             if not nome_filtrado.empty: nome_atual = nome_filtrado.iloc[0]['nome']
 
-        nome_selecionado = c2.selectbox("🔎 Buscar e Selecionar Estagiário", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
+        with c2:
+            nome_selecionado = st.selectbox("🔎 Buscar e Selecionar Estagiário", options=nomes_estagiarios, index=nomes_estagiarios.index(nome_atual) if nome_atual in nomes_estagiarios else 0, disabled=bool(st.session_state.confirm_delete))
         st.divider()
 
         if nome_selecionado and not st.session_state.confirm_delete:
