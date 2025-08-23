@@ -318,10 +318,6 @@ def main():
         st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
     
-    # Gerenciamento de estado para resetar páginas
-    if 'main_selection' not in st.session_state:
-        st.session_state.main_selection = "Dashboard"
-
     selected = option_menu(
         menu_title=None,
         options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
@@ -339,21 +335,12 @@ def main():
             },
             "nav-link-selected": {
                 "background-color": "transparent",
-                "color": "var(--primary-color)",
+                "color": "var(--text-color)", # Texto selecionado fica branco
                 "border-bottom": "3px solid var(--primary-color)",
                 "font-weight": "600",
             },
         }
     )
-
-    # LÓGICA DE RESET DE PÁGINA
-    if selected != st.session_state.main_selection:
-        st.session_state.main_selection = selected
-        # Limpa os estados específicos das sub-páginas
-        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule']:
-            if key in st.session_state:
-                st.session_state[key] = None
-        st.rerun()
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
@@ -416,7 +403,7 @@ def main():
             show_message(st.session_state.message)
             st.session_state.message = None
 
-        cols = st.columns([0.25, 0.3, 0.45])
+        cols = st.columns(2)
         if cols[0].button("➕ Novo Estagiário"):
             if st.session_state.sub_menu_cad != "Novo":
                 st.session_state.sub_menu_cad = "Novo"
