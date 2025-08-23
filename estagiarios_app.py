@@ -78,7 +78,7 @@ def load_custom_css():
                 --primary-color: #faf9f7;
                 --background-color: #E2A144;
                 --secondary-background-color: #212121;
-                --text-color: #EAEAEA;
+                --text-color: #E2A144;
                 --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
@@ -669,5 +669,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
