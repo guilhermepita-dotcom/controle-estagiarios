@@ -9,6 +9,7 @@ import streamlit as st
 from dateutil.relativedelta import relativedelta
 from PIL import Image
 from streamlit_option_menu import option_menu
+import pytz
 
 # ==========================
 # Configurações e Constantes
@@ -732,3 +733,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
