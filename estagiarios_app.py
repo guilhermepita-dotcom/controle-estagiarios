@@ -75,7 +75,7 @@ def load_custom_css():
             @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
             
             :root {
-                --primary-color: #E2A144;
+                --primary-color: #faf9f7;
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
                 --text-color: #EAEAEA;
@@ -669,3 +669,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
