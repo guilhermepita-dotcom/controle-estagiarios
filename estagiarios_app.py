@@ -310,40 +310,35 @@ def main():
     load_custom_css()
     init_db()
 
-    # --- MENU DE NAVEGAÇÃO NO TOPO ---
-    selected = option_menu(
-        menu_title=None,
-        options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
-        icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
-        menu_icon="cast", 
-        default_index=0,
-        orientation="horizontal",
-        styles={
-            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
-            "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
-            "nav-link": {
-                "font-size": "16px", "text-align": "center", "margin": "0px",
-                "padding-bottom": "10px", "color": "var(--text-color-muted)",
-                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
-            },
-            "nav-link-selected": {
-                "background-color": "transparent",
-                "color": "var(--text-color)", # Texto selecionado fica branco
-                "border-bottom": "3px solid var(--primary-color)",
-                "font-weight": "600",
-            },
-        }
-    )
-
-    # --- CABEÇALHO ---
-    st.markdown("<br>", unsafe_allow_html=True) # Espaço extra
-    c1, c2 = st.columns([1, 5], vertical_alignment="center")
+    # --- CABEÇALHO COM LOGO E MENU LADO A LADO ---
+    c1, c2 = st.columns([1, 4], vertical_alignment="center")
     with c1:
         if os.path.exists(LOGO_FILE):
             st.image(LOGO_FILE, width=150)
     with c2:
-        st.markdown(f"<h1 style='margin-bottom: -15px;'>{selected}</h1>", unsafe_allow_html=True)
-        st.caption("Controle de Contratos de Estagiários")
+        selected = option_menu(
+            menu_title=None,
+            options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
+            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+            menu_icon="cast", 
+            default_index=0,
+            orientation="horizontal",
+            styles={
+                "container": {"padding": "0!important", "background-color": "transparent"},
+                "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
+                "nav-link": {
+                    "font-size": "16px", "text-align": "center", "margin": "0px 10px",
+                    "padding-bottom": "10px", "color": "var(--text-color-muted)",
+                    "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
+                },
+                "nav-link-selected": {
+                    "background-color": "transparent",
+                    "color": "var(--primary-color)",
+                    "border-bottom": "3px solid var(--primary-color)",
+                    "font-weight": "600",
+                },
+            }
+        )
     st.divider()
     
     # Lógica de Reset de Página
@@ -407,6 +402,8 @@ def main():
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
     if selected == "Cadastro":
+        st.subheader("Gerenciar Cadastro de Estagiário")
+        
         if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
         if 'message' not in st.session_state: st.session_state.message = None
         
