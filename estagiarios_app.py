@@ -93,7 +93,6 @@ def load_custom_css():
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
             h1 { color: var(--primary-color) !important; }
 
-            /* Estilo de Botão Padronizado com Hover Invertido */
             .stButton > button {
                 background-color: transparent;
                 color: var(--primary-color);
@@ -319,6 +318,10 @@ def main():
         st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
         st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
     
+    # Gerenciamento de estado para resetar páginas
+    if 'main_selection' not in st.session_state:
+        st.session_state.main_selection = "Dashboard"
+
     selected = option_menu(
         menu_title=None,
         options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
@@ -342,6 +345,15 @@ def main():
             },
         }
     )
+
+    # LÓGICA DE RESET DE PÁGINA
+    if selected != st.session_state.main_selection:
+        st.session_state.main_selection = selected
+        # Limpa os estados específicos das sub-páginas
+        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule']:
+            if key in st.session_state:
+                st.session_state[key] = None
+        st.rerun()
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
@@ -397,7 +409,6 @@ def main():
     if selected == "Cadastro":
         st.subheader("Gerenciar Cadastro de Estagiário")
         
-        # Gerenciamento de estado da página
         if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
         if 'message' not in st.session_state: st.session_state.message = None
         
@@ -405,17 +416,17 @@ def main():
             show_message(st.session_state.message)
             st.session_state.message = None
 
-        # Botões do Sub-menu
-        cols = st.columns(2)
+        cols = st.columns([0.25, 0.3, 0.45])
         if cols[0].button("➕ Novo Estagiário"):
-            st.session_state.sub_menu_cad = "Novo"
-            st.rerun()
+            if st.session_state.sub_menu_cad != "Novo":
+                st.session_state.sub_menu_cad = "Novo"
+                st.rerun()
         if cols[1].button("🔎 Consultar / Editar"):
-            st.session_state.sub_menu_cad = "Editar"
-            st.rerun()
+            if st.session_state.sub_menu_cad != "Editar":
+                st.session_state.sub_menu_cad = "Editar"
+                st.rerun()
         st.divider()
 
-        # Lógica para exibir o conteúdo do sub-menu
         if st.session_state.sub_menu_cad == "Novo":
             if 'cadastro_universidade' not in st.session_state: st.session_state.cadastro_universidade = None
 
@@ -465,7 +476,7 @@ def main():
                             st.session_state.cadastro_universidade = None
                             st.session_state.sub_menu_cad = None
                         st.rerun()
-                    if c_cancel.form_submit_button("🧹 Cancelar", type="secondary"):
+                    if c_cancel.form_submit_button("🧹 Cancelar"):
                         st.session_state.cadastro_universidade = None
                         st.session_state.sub_menu_cad = None
                         st.rerun()
