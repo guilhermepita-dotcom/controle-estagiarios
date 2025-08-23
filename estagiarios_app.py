@@ -111,6 +111,14 @@ def load_custom_css():
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
+            .stButton > button[kind="primary"] {
+                background-color: var(--primary-color);
+                border-color: var(--primary-color);
+            }
+            .stButton > button[kind="primary"]:hover {
+                background-color: transparent;
+                color: var(--primary-color);
+            }
 
             [data-testid="stMetric"] {
                 background-color: var(--secondary-background-color);
