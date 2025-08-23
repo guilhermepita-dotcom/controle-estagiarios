@@ -372,7 +372,7 @@ def main():
             c3.metric("⚠️ Vencimentos Próximos", prox)
             c4.metric("⛔ Contratos Vencidos", venc)
         
-        st.subheader("📋 Consulta de Estagiários")
+        st.subheader("Consulta de Estagiários")
         if df.empty:
             st.info("Nenhum estagiário cadastrado ainda.")
         else:
@@ -389,19 +389,19 @@ def main():
                 st.warning("Nenhum registro encontrado para os filtros selecionados.")
             else:
                 df_view["proxima_renovacao"] = df_view.apply(calcular_proxima_renovacao, axis=1)
-                colunas_ordenadas = ['id', 'nome', 'universidade', 'data_admissao', 'data_ult_renovacao', 'status', 'ultimo_ano', 'proxima_renovacao', 'data_vencimento', 'obs']
-                df_view = df_view.reindex(columns=colunas_ordenadas)
-                st.dataframe(
-                    df_view,
-                    column_config={
-                        "id": "ID", "nome": "Nome", "universidade": "Universidade",
-                        "data_admissao": "Data Admissão", "data_ult_renovacao": "Renovado em:",
-                        "status": "Status", "ultimo_ano": "Ultimo Ano?",
-                        "proxima_renovacao": "Proxima Renovação", "data_vencimento": "Termino de Contrato",
-                        "obs": "Observação"
-                    },
-                    use_container_width=True, hide_index=True
-                )
+                
+                # Renomeia colunas para exibição
+                df_display = df_view.rename(columns={
+                    'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
+                    'data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:',
+                    'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
+                    'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato',
+                    'obs': 'Observação'
+                })
+                
+                colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
+                df_display = df_display.reindex(columns=colunas_ordenadas)
+                st.dataframe(df_display, use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
     if selected == "Cadastro/Editar":
@@ -669,4 +669,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-                                        
