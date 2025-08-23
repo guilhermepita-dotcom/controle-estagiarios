@@ -310,14 +310,7 @@ def main():
     load_custom_css()
     init_db()
 
-    c1, c2 = st.columns([1, 5], vertical_alignment="center")
-    with c1:
-        if os.path.exists(LOGO_FILE):
-            st.image(LOGO_FILE, width=150)
-    with c2:
-        st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
-        st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
-    
+    # --- MENU DE NAVEGAÇÃO NO TOPO ---
     selected = option_menu(
         menu_title=None,
         options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
@@ -341,6 +334,26 @@ def main():
             },
         }
     )
+
+    # --- CABEÇALHO ---
+    st.markdown("<br>", unsafe_allow_html=True) # Espaço extra
+    c1, c2 = st.columns([1, 5], vertical_alignment="center")
+    with c1:
+        if os.path.exists(LOGO_FILE):
+            st.image(LOGO_FILE, width=150)
+    with c2:
+        st.markdown(f"<h1 style='margin-bottom: -15px;'>{selected}</h1>", unsafe_allow_html=True)
+        st.caption("Controle de Contratos de Estagiários")
+    st.divider()
+    
+    # Lógica de Reset de Página
+    if 'main_selection' not in st.session_state: st.session_state.main_selection = "Dashboard"
+    if selected != st.session_state.main_selection:
+        st.session_state.main_selection = selected
+        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule']:
+            if key in st.session_state:
+                st.session_state[key] = None
+        st.rerun()
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
@@ -394,8 +407,6 @@ def main():
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
 
     if selected == "Cadastro":
-        st.subheader("Gerenciar Cadastro de Estagiário")
-        
         if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
         if 'message' not in st.session_state: st.session_state.message = None
         
