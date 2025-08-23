@@ -417,10 +417,10 @@ def main():
         if nome_selecionado and not st.session_state.confirm_delete:
             id_novo = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
             if st.session_state.est_selecionado_id != id_novo:
-                st.session_state.est_selecionado_id, st.session_state.form_mode = id_novo, 'edit'
+                st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = id_novo, 'edit', None
                 st.rerun()
         elif st.session_state.est_selecionado_id is not None and not nome_selecionado:
-             st.session_state.est_selecionado_id, st.session_state.form_mode = None, None
+             st.session_state.est_selecionado_id, st.session_state.form_mode, st.session_state.cadastro_universidade = None, None, None
              st.rerun()
 
         universidade_para_form = None
@@ -435,6 +435,13 @@ def main():
                 st.subheader("Passo 1: Selecione a Universidade")
                 uni_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...")
                 
+                col1_passo1, col2_passo1 = st.columns([1, 5])
+                with col1_passo1:
+                    if st.button("Cancelar"):
+                        st.session_state.form_mode = None
+                        st.session_state.cadastro_universidade = None
+                        st.rerun()
+
                 if uni_selecionada == "Outra (cadastrar manualmente)":
                     uni_outra = st.text_input("Digite o nome da Universidade*")
                     if st.button("Continuar"):
