@@ -685,36 +685,16 @@ def main():
 
             with c2:
                 st.subheader("Logs do Sistema")
-                
-                col_f1, col_f2 = st.columns(2)
-                start_date = col_f1.date_input("Data Início", value=None)
-                end_date = col_f2.date_input("Data Fim", value=None)
-                
-                logs_df = list_logs_df(start_date=start_date, end_date=end_date)
+                filter_date = st.date_input("Filtrar logs por data:", value=None)
+                logs_df = list_logs_df(filter_date=filter_date)
                 
                 if logs_df.empty:
-                    st.info("Nenhum log encontrado para o período selecionado.")
+                    st.info("Nenhum log encontrado para a data selecionada.")
                 else:
                     st.dataframe(logs_df, use_container_width=True, hide_index=True)
                 
-                col_d1, col_d2 = st.columns(2)
-                with col_d1:
-                    log_periodo_bytes = exportar_logs_bytes(start_date=start_date, end_date=end_date)
-                    st.download_button(
-                        label="📥 Baixar Log do Período", 
-                        data=log_periodo_bytes, 
-                        file_name=f"log_{start_date}_a_{end_date}.txt" if start_date and end_date else "log_periodo.txt", 
-                        mime="text/plain",
-                        disabled=not (start_date and end_date)
-                    )
-                with col_d2:
-                    log_completo_bytes = exportar_logs_bytes()
-                    st.download_button(
-                        label="📥 Baixar Log Completo", 
-                        data=log_completo_bytes, 
-                        file_name="log_completo.txt", 
-                        mime="text/plain"
-                    )
+                log_bytes = exportar_logs_bytes()
+                st.download_button(label="📥 Baixar Log Completo", data=log_bytes, file_name="log_completo.txt", mime="text/plain")
 
             if st.button("Sair da Área Admin"):
                 st.session_state.admin_logged_in = False
