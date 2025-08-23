@@ -396,14 +396,27 @@ def main():
     if selected == "Cadastro":
         st.subheader("Gerenciar Cadastro de Estagiário")
         
+        if 'sub_menu_cad' not in st.session_state:
+            st.session_state.sub_menu_cad = "Selecione uma Ação"
+
         sub_selected = option_menu(
             menu_title=None,
-            options=["➕ Novo Estagiário", "🔎 Consultar / Editar"],
-            icons=['person-plus-fill', 'search'],
+            options=["Selecione uma Ação", "➕ Novo Estagiário", "🔎 Consultar / Editar"],
+            default_index=0,
             orientation="horizontal",
             styles={
                 "container": {"padding": "0!important", "background-color": "transparent"},
-                "nav-link-selected": {"background-color": "#333"},
+                "nav-link": {
+                    "background-color": "transparent",
+                    "color": "var(--primary-color)",
+                    "border": "2px solid var(--primary-color)",
+                    "border-radius": "8px",
+                    "margin": "0 5px",
+                },
+                "nav-link-selected": {
+                    "background-color": "var(--primary-color)",
+                    "color": "#FFFFFF",
+                },
             }
         )
         st.divider()
