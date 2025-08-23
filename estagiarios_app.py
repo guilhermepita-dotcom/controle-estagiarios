@@ -77,7 +77,7 @@ def load_custom_css():
             :root {
                 --primary-color: #FFFFFF;
                 --background-color: #faf9f7;
-                --secondary-background-color: #ede8e1;
+                --secondary-background-color: #706f6e;
                 --text-color: #FFFFFF;
                 --text-color-muted: #E2A144;
                 --font-family: 'Poppins', sans-serif;
@@ -669,6 +669,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
