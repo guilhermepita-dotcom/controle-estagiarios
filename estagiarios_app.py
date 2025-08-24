@@ -80,8 +80,8 @@ def load_custom_css():
                 --primary-color: #E2A144;
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
-                --text-color: #EAEAEA;
-                --text-color-muted: #888;
+                --text-color: #FFFFFF;
+                --text-color-dark: #0F0F0F;
                 --font-family: 'Poppins', sans-serif;
             }
 
@@ -93,7 +93,7 @@ def load_custom_css():
             .main > div { background-color: var(--background-color); }
             
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
-            h1 { color: var(--primary-color) !important; }
+            h1 { color: var(--text-color) !important; }
 
             .stButton > button {
                 background-color: transparent;
@@ -175,6 +175,14 @@ def init_db():
     """)
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT
+        )
+    """)
     
     c.execute("SELECT value FROM config WHERE key='regras_iniciadas'")
     regras_iniciadas = c.fetchone()
@@ -202,6 +210,12 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e CRUD
 # ==========================
+def log_action(action: str, details: str = ""):
+    conn = get_db_connection()
+    timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
+    conn.commit()
+
 def list_regras() -> pd.DataFrame:
     df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
     return df
@@ -242,31 +256,56 @@ def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: 
     conn = get_db_connection()
     conn.execute("INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)", (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None))
     conn.commit()
+    log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     conn = get_db_connection()
     conn.execute("UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?", (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id))
     conn.commit()
+    log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
-def delete_estagiario(est_id: int):
+def delete_estagiario(est_id: int, nome: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     conn.commit()
+    log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
 def add_regra(keyword: str, meses: int):
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     conn.commit()
+    log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
 
-def update_regra(regra_id: int, keyword: str, meses: int):
-    conn = get_db_connection()
-    conn.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
-    conn.commit()
-
-def delete_regra(regra_id: int):
+def delete_regra(regra_id: int, keyword: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
     conn.commit()
+    log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
+
+def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
+    conn = get_db_connection()
+    query = "SELECT timestamp, action, details FROM logs"
+    params = {}
+    if start_date and end_date:
+        query += " WHERE date(timestamp) BETWEEN :start_date AND :end_date"
+        params['start_date'] = start_date.strftime('%Y-%m-%d')
+        params['end_date'] = end_date.strftime('%Y-%m-%d')
+    query += " ORDER BY id DESC LIMIT 50"
+    df = pd.read_sql_query(query, conn, params=params if params else None)
+    return df
+
+def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
+    conn = get_db_connection()
+    query = "SELECT timestamp, action, details FROM logs"
+    params = {}
+    if start_date and end_date:
+        query += " WHERE date(timestamp) BETWEEN :start_date AND :end_date"
+        params['start_date'] = start_date.strftime('%Y-%m-%d')
+        params['end_date'] = end_date.strftime('%Y-%m-%d')
+    query += " ORDER BY id ASC"
+    df = pd.read_sql_query(query, conn, params=params if params else None)
+    log_string = df.to_string(index=False)
+    return log_string.encode('utf-8')
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
