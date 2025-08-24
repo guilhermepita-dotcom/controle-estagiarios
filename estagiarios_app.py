@@ -18,7 +18,7 @@ DB_FILE = "estagiarios.db"
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
-DEFAULT_REGRAS = []
+DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
 universidades_padrao = [
@@ -111,9 +111,11 @@ def load_custom_css():
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
+            /* Botão de confirmação agora usa a cor primária */
             .stButton > button[kind="primary"] {
                 background-color: var(--primary-color);
                 border-color: var(--primary-color);
+                color: #FFFFFF; /* Texto branco para contraste */
             }
             .stButton > button[kind="primary"]:hover {
                 background-color: transparent;
@@ -359,55 +361,63 @@ def main():
     load_custom_css()
     init_db()
 
-    # --- CABEÇALHO COM LOGO E MENU LADO A LADO ---
-    c1, c2 = st.columns([1, 4], vertical_alignment="center")
+    selected = option_menu(
+        menu_title=None,
+        options=["Dashboard", "Base", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
+        icons=['bar-chart-line-fill', 'database-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+        menu_icon="cast", 
+        default_index=0,
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
+            "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px", "text-align": "center", "margin": "0px",
+                "padding-bottom": "10px", "color": "var(--text-color-muted)",
+                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
+            },
+            "nav-link-selected": {
+                "background-color": "transparent",
+                "color": "var(--primary-color)",
+                "border-bottom": "3px solid var(--primary-color)",
+                "font-weight": "600",
+            },
+        }
+    )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 5], vertical_alignment="center")
     with c1:
         if os.path.exists(LOGO_FILE):
             st.image(LOGO_FILE, width=150)
     with c2:
-        selected = option_menu(
-            menu_title=None,
-            options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
-            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
-            menu_icon="cast", 
-            default_index=0,
-            orientation="horizontal",
-            styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
-                "nav-link": {
-                    "font-size": "16px", "text-align": "center", "margin": "0px 10px",
-                    "padding-bottom": "10px", "color": "var(--text-color-muted)",
-                    "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
-                },
-                "nav-link-selected": {
-                    "background-color": "transparent",
-                    "color": "var(--primary-color)",
-                    "border-bottom": "3px solid var(--primary-color)",
-                    "font-weight": "600",
-                },
-            }
-        )
+        st.markdown(f"<h1 style='margin-bottom: -15px;'>{selected}</h1>", unsafe_allow_html=True)
+        st.caption("Controle de Contratos de Estagiários")
     st.divider()
     
-    # Lógica de Reset de Página
     if 'main_selection' not in st.session_state: st.session_state.main_selection = "Dashboard"
     if selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
-        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule']:
-            if key in st.session_state:
+        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule', 'filtro_status_dash', 'filtro_nome_dash']:
+            if key == 'filtro_status_dash':
+                st.session_state[key] = []
+            elif key == 'filtro_nome_dash':
+                st.session_state[key] = ""
+            else:
                 st.session_state[key] = None
         st.rerun()
     
     if selected == "Dashboard":
         c_dash1, c_dash2 = st.columns([3, 1])
+        with c_dash1:
+            st.subheader("Visão Geral")
         with c_dash2:
             proximos_dias_input = st.number_input("'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1)
             set_config("proximos_dias", str(proximos_dias_input))
         
         df = list_estagiarios_df()
         if df.empty:
-            c_dash1.info("Nenhum estagiário cadastrado para exibir métricas.")
+            st.info("Nenhum estagiário cadastrado para exibir métricas.")
         else:
             df["status"] = df["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
             total, ok, prox, venc = len(df), (df["status"] == "OK").sum(), (df["status"] == "Venc.Proximo").sum(), (df["status"] == "Vencido").sum()
@@ -417,35 +427,49 @@ def main():
             c3.metric("⚠️ Vencimentos Próximos", prox)
             c4.metric("⛔ Contratos Vencidos", venc)
         
-        if df.empty:
-            st.info("Nenhum estagiário cadastrado ainda.")
-        else:
-            filtros_c1, filtros_c2 = st.columns(2)
-            with filtros_c1:
-                filtro_status = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
-            with filtros_c2:
-                filtro_nome = st.text_input("🔎 Buscar por Nome do Estagiário")
+        st.subheader("Consulta Rápida:")
+        if 'filtro_status_dash' not in st.session_state: st.session_state.filtro_status_dash = []
+        if 'filtro_nome_dash' not in st.session_state: st.session_state.filtro_nome_dash = ""
+        
+        filtros_c1, filtros_c2 = st.columns(2)
+        st.session_state.filtro_status_dash = filtros_c1.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=st.session_state.filtro_status_dash)
+        st.session_state.filtro_nome_dash = filtros_c2.text_input("🔎 Buscar por Nome do Estagiário", value=st.session_state.filtro_nome_dash)
 
+        if not st.session_state.filtro_status_dash and not st.session_state.filtro_nome_dash.strip():
+            st.info("Aplique um filtro para visualizar os resultados.")
+        else:
             df_view = df.copy()
-            if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
-            if filtro_nome.strip(): df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
+            if st.session_state.filtro_status_dash: df_view = df_view[df_view["status"].isin(st.session_state.filtro_status_dash)]
+            if st.session_state.filtro_nome_dash.strip(): df_view = df_view[df_view["nome"].str.contains(st.session_state.filtro_nome_dash.strip(), case=False, na=False)]
             if df_view.empty:
                 st.warning("Nenhum registro encontrado para os filtros selecionados.")
             else:
                 df_view["proxima_renovacao"] = df_view.apply(calcular_proxima_renovacao, axis=1)
-                
-                df_display = df_view.rename(columns={
-                    'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
-                    'data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:',
-                    'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
-                    'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato',
-                    'obs': 'Observação'
-                })
-                
+                df_display = df_view.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade','data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:','status': 'Status', 'ultimo_ano': 'Ultimo Ano?','proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato','obs': 'Observação'})
                 colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
                 df_display = df_display.reindex(columns=colunas_ordenadas)
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
+
+    if selected == "Base":
+        st.subheader("🗃️ Base Completa de Estagiários")
+        df_base = list_estagiarios_df()
+        
+        if df_base.empty:
+            st.info("Nenhum estagiário cadastrado.")
+        else:
+            df_base["status"] = df_base["data_vencimento"].apply(lambda d: classificar_status(d, int(get_config("proximos_dias"))))
+            filtro_status_base = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
+            
+            df_view_base = df_base.copy()
+            if filtro_status_base:
+                df_view_base = df_view_base[df_view_base["status"].isin(filtro_status_base)]
+            
+            df_view_base["proxima_renovacao"] = df_view_base.apply(calcular_proxima_renovacao, axis=1)
+            df_display_base = df_view_base.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade','data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:','status': 'Status', 'ultimo_ano': 'Ultimo Ano?','proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato','obs': 'Observação'})
+            colunas_ordenadas_base = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
+            df_display_base = df_display_base.reindex(columns=colunas_ordenadas_base)
+            st.dataframe(df_display_base, use_container_width=True, hide_index=True)
 
     if selected == "Cadastro":
         if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
@@ -744,4 +768,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
