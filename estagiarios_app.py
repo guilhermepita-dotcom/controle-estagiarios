@@ -80,7 +80,7 @@ def load_custom_css():
                 --primary-color: #E2A144;
                 --background-color: #0F0F0F;
                 --secondary-background-color: #212121;
-                --text-color: #EAEAEA;
+                --text-color: #FFFFFF;
                 --text-color-muted: #888;
                 --font-family: 'Poppins', sans-serif;
             }
@@ -359,6 +359,14 @@ def main():
     load_custom_css()
     init_db()
 
+    c1, c2 = st.columns([1, 5], vertical_alignment="center")
+    with c1:
+        if os.path.exists(LOGO_FILE):
+            st.image(LOGO_FILE, width=150)
+    with c2:
+        st.markdown("<h1 style='margin-bottom: -15px;'>Controle de Contratos de Estagiários</h1>", unsafe_allow_html=True)
+        st.caption("Cadastro, Renovação e Acompanhamento de Vencimentos")
+    
     selected = option_menu(
         menu_title=None,
         options=["Dashboard", "Base", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
@@ -382,16 +390,6 @@ def main():
             },
         }
     )
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    c1, c2 = st.columns([1, 5], vertical_alignment="center")
-    with c1:
-        if os.path.exists(LOGO_FILE):
-            st.image(LOGO_FILE, width=150)
-    with c2:
-        st.markdown(f"<h1 style='margin-bottom: -15px;'>{selected}</h1>", unsafe_allow_html=True)
-        st.caption("Controle de Contratos de Estagiários")
-    st.divider()
     
     if 'main_selection' not in st.session_state: st.session_state.main_selection = "Dashboard"
     if selected != st.session_state.main_selection:
