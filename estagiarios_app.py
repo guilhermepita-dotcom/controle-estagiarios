@@ -93,7 +93,7 @@ def load_custom_css():
             .main > div { background-color: var(--background-color); }
             
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
-            h1 { color: var(--primary-color) !important; }
+            h1 { color: var(--text-color) !important; }
 
             .stButton > button {
                 background-color: transparent;
@@ -111,11 +111,9 @@ def load_custom_css():
             .stButton > button:focus {
                 box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important;
             }
-            /* Botão de confirmação agora usa a cor primária */
             .stButton > button[kind="primary"] {
                 background-color: var(--primary-color);
                 border-color: var(--primary-color);
-                color: #FFFFFF; /* Texto branco para contraste */
             }
             .stButton > button[kind="primary"]:hover {
                 background-color: transparent;
@@ -123,7 +121,7 @@ def load_custom_css():
             }
 
             [data-testid="stMetric"] {
-                background-color: var(--secondary-background-color);
+                background-color: rgba(33, 33, 33, 0.3);
                 border-radius: 10px;
                 padding: 20px;
                 border-left: 5px solid var(--primary-color);
