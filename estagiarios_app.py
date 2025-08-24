@@ -175,6 +175,14 @@ def init_db():
     """)
     c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT
+        )
+    """)
     
     c.execute("SELECT value FROM config WHERE key='regras_iniciadas'")
     regras_iniciadas = c.fetchone()
@@ -202,6 +210,12 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e CRUD
 # ==========================
+def log_action(action: str, details: str = ""):
+    conn = get_db_connection()
+    timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
+    conn.commit()
+
 def list_regras() -> pd.DataFrame:
     df = pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
     return df
@@ -242,31 +256,56 @@ def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: 
     conn = get_db_connection()
     conn.execute("INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)", (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None))
     conn.commit()
+    log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     conn = get_db_connection()
     conn.execute("UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?", (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id))
     conn.commit()
+    log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
-def delete_estagiario(est_id: int):
+def delete_estagiario(est_id: int, nome: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     conn.commit()
+    log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
 def add_regra(keyword: str, meses: int):
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     conn.commit()
+    log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
 
-def update_regra(regra_id: int, keyword: str, meses: int):
-    conn = get_db_connection()
-    conn.execute("UPDATE regras SET keyword=?, meses=? WHERE id=?", (keyword.upper().strip(), meses, int(regra_id)))
-    conn.commit()
-
-def delete_regra(regra_id: int):
+def delete_regra(regra_id: int, keyword: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
     conn.commit()
+    log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
+
+def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
+    conn = get_db_connection()
+    query = "SELECT timestamp, action, details FROM logs"
+    params = {}
+    if start_date and end_date:
+        query += " WHERE date(timestamp) BETWEEN :start_date AND :end_date"
+        params['start_date'] = start_date.strftime('%Y-%m-%d')
+        params['end_date'] = end_date.strftime('%Y-%m-%d')
+    query += " ORDER BY id DESC LIMIT 50"
+    df = pd.read_sql_query(query, conn, params=params if params else None)
+    return df
+
+def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
+    conn = get_db_connection()
+    query = "SELECT timestamp, action, details FROM logs"
+    params = {}
+    if start_date and end_date:
+        query += " WHERE date(timestamp) BETWEEN :start_date AND :end_date"
+        params['start_date'] = start_date.strftime('%Y-%m-%d')
+        params['end_date'] = end_date.strftime('%Y-%m-%d')
+    query += " ORDER BY id ASC"
+    df = pd.read_sql_query(query, conn, params=params if params else None)
+    log_string = df.to_string(index=False)
+    return log_string.encode('utf-8')
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     if not data_adm: return None
@@ -325,43 +364,49 @@ def main():
     load_custom_css()
     init_db()
 
-    # --- CABEÇALHO COM LOGO E MENU LADO A LADO ---
-    c1, c2 = st.columns([1, 4], vertical_alignment="center")
+    selected = option_menu(
+        menu_title=None,
+        options=["Dashboard", "Base", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
+        icons=['bar-chart-line-fill', 'database-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+        menu_icon="cast", 
+        default_index=0,
+        orientation="horizontal",
+        styles={
+            "container": {"padding": "0!important", "background-color": "transparent", "border-bottom": "1px solid #333"},
+            "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
+            "nav-link": {
+                "font-size": "16px", "text-align": "center", "margin": "0px",
+                "padding-bottom": "10px", "color": "var(--text-color-muted)",
+                "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
+            },
+            "nav-link-selected": {
+                "background-color": "transparent",
+                "color": "var(--primary-color)",
+                "border-bottom": "3px solid var(--primary-color)",
+                "font-weight": "600",
+            },
+        }
+    )
+    
+    st.markdown("<br>", unsafe_allow_html=True)
+    c1, c2 = st.columns([1, 5], vertical_alignment="center")
     with c1:
         if os.path.exists(LOGO_FILE):
             st.image(LOGO_FILE, width=150)
     with c2:
-        selected = option_menu(
-            menu_title=None,
-            options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
-            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
-            menu_icon="cast", 
-            default_index=0,
-            orientation="horizontal",
-            styles={
-                "container": {"padding": "0!important", "background-color": "transparent"},
-                "icon": {"color": "var(--text-color-muted)", "font-size": "20px"},
-                "nav-link": {
-                    "font-size": "16px", "text-align": "center", "margin": "0px 10px",
-                    "padding-bottom": "10px", "color": "var(--text-color-muted)",
-                    "border-bottom": "3px solid transparent", "transition": "color 0.3s, border-bottom 0.3s",
-                },
-                "nav-link-selected": {
-                    "background-color": "transparent",
-                    "color": "var(--primary-color)",
-                    "border-bottom": "3px solid var(--primary-color)",
-                    "font-weight": "600",
-                },
-            }
-        )
+        st.markdown(f"<h1 style='margin-bottom: -15px;'>{selected}</h1>", unsafe_allow_html=True)
+        st.caption("Controle de Contratos de Estagiários")
     st.divider()
     
-    # Lógica de Reset de Página
     if 'main_selection' not in st.session_state: st.session_state.main_selection = "Dashboard"
     if selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
-        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule']:
-            if key in st.session_state:
+        for key in ['sub_menu_cad', 'cadastro_universidade', 'est_selecionado_id', 'confirm_delete', 'confirm_delete_rule', 'filtro_status_dash', 'filtro_nome_dash']:
+            if key == 'filtro_status_dash':
+                st.session_state[key] = []
+            elif key == 'filtro_nome_dash':
+                st.session_state[key] = ""
+            else:
                 st.session_state[key] = None
         st.rerun()
     
@@ -383,35 +428,49 @@ def main():
             c3.metric("⚠️ Vencimentos Próximos", prox)
             c4.metric("⛔ Contratos Vencidos", venc)
         
-        if df.empty:
-            st.info("Nenhum estagiário cadastrado ainda.")
-        else:
-            filtros_c1, filtros_c2 = st.columns(2)
-            with filtros_c1:
-                filtro_status = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
-            with filtros_c2:
-                filtro_nome = st.text_input("🔎 Buscar por Nome do Estagiário")
+        st.subheader("Consulta Rápida:")
+        if 'filtro_status_dash' not in st.session_state: st.session_state.filtro_status_dash = []
+        if 'filtro_nome_dash' not in st.session_state: st.session_state.filtro_nome_dash = ""
+        
+        filtros_c1, filtros_c2 = st.columns(2)
+        st.session_state.filtro_status_dash = filtros_c1.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=st.session_state.filtro_status_dash)
+        st.session_state.filtro_nome_dash = filtros_c2.text_input("🔎 Buscar por Nome do Estagiário", value=st.session_state.filtro_nome_dash)
 
+        if not st.session_state.filtro_status_dash and not st.session_state.filtro_nome_dash.strip():
+            st.info("Aplique um filtro para visualizar os resultados.")
+        else:
             df_view = df.copy()
-            if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
-            if filtro_nome.strip(): df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
+            if st.session_state.filtro_status_dash: df_view = df_view[df_view["status"].isin(st.session_state.filtro_status_dash)]
+            if st.session_state.filtro_nome_dash.strip(): df_view = df_view[df_view["nome"].str.contains(st.session_state.filtro_nome_dash.strip(), case=False, na=False)]
             if df_view.empty:
                 st.warning("Nenhum registro encontrado para os filtros selecionados.")
             else:
                 df_view["proxima_renovacao"] = df_view.apply(calcular_proxima_renovacao, axis=1)
-                
-                df_display = df_view.rename(columns={
-                    'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
-                    'data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:',
-                    'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
-                    'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato',
-                    'obs': 'Observação'
-                })
-                
+                df_display = df_view.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade','data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:','status': 'Status', 'ultimo_ano': 'Ultimo Ano?','proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato','obs': 'Observação'})
                 colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
                 df_display = df_display.reindex(columns=colunas_ordenadas)
                 st.dataframe(df_display, use_container_width=True, hide_index=True)
                 st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
+
+    if selected == "Base":
+        st.subheader("🗃️ Base Completa de Estagiários")
+        df_base = list_estagiarios_df()
+        
+        if df_base.empty:
+            st.info("Nenhum estagiário cadastrado.")
+        else:
+            df_base["status"] = df_base["data_vencimento"].apply(lambda d: classificar_status(d, int(get_config("proximos_dias"))))
+            filtro_status_base = st.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"], default=[])
+            
+            df_view_base = df_base.copy()
+            if filtro_status_base:
+                df_view_base = df_view_base[df_view_base["status"].isin(filtro_status_base)]
+            
+            df_view_base["proxima_renovacao"] = df_view_base.apply(calcular_proxima_renovacao, axis=1)
+            df_display_base = df_view_base.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade','data_admissao': 'Data Admissão', 'data_ult_renovacao': 'Renovado em:','status': 'Status', 'ultimo_ano': 'Ultimo Ano?','proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato','obs': 'Observação'})
+            colunas_ordenadas_base = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
+            df_display_base = df_display_base.reindex(columns=colunas_ordenadas_base)
+            st.dataframe(df_display_base, use_container_width=True, hide_index=True)
 
     if selected == "Cadastro":
         if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
