@@ -38,7 +38,7 @@ universidades_padrao = [
     "IMPA – Instituto de Matemática Pura e Aplicada",
     "ISERJ – Instituto Superior de Educação do Rio de Janeiro",
     "Mackenzie Rio – Universidade Presbiteriana Mackenzie",
-    "PUC-Rio – Pontifícia Universidade Católica do Rio de Janeiro",
+    "PUC-Rio – Pontífícia Universidade Católica do Rio de Janeiro",
     "Santa Úrsula – Associação Universitária Santa Úrsula",
     "UCAM – Universidade Cândido Mendes",
     "UCB – Universidade Castelo Branco",
@@ -94,16 +94,12 @@ def load_custom_css():
 # ==========================
 # Banco de Dados (Arquitetura Robusta)
 # ==========================
-@st.cache_resource
+# <-- MUDANÇA 1: Removido @st.cache_resource para garantir dados sempre atualizados
 def get_read_connection():
-    try:
-        conn = sqlite3.connect(f'file:{DB_FILE}?mode=ro', check_same_thread=False, uri=True)
-        conn.row_factory = sqlite3.Row
-        return conn
-    except sqlite3.OperationalError:
-        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        return conn
+    # A conexão agora é sempre nova, evitando cache de dados.
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 def execute_write_query(query: str, params: tuple = ()):
     try:
@@ -111,6 +107,7 @@ def execute_write_query(query: str, params: tuple = ()):
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
+        # st.cache_resource.clear() foi mantido caso algum outro cache seja adicionado no futuro.
         st.cache_resource.clear()
     except sqlite3.Error as e:
         st.error(f"Erro ao escrever no banco de dados: {e}")
@@ -128,7 +125,10 @@ def init_db():
     if not get_config('admin_password'): set_config('admin_password', '123456')
 
 def get_config(key: str, default: Optional[str] = None) -> str:
-    row = get_read_connection().execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+    # Usa uma conexão de leitura nova a cada chamada
+    conn = get_read_connection()
+    row = conn.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+    conn.close()
     return row['value'] if row else (default if default is not None else "")
 
 def set_config(key: str, value: str):
@@ -166,13 +166,26 @@ def get_estagiarios_df() -> pd.DataFrame:
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     query = "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)"
-    params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
+    # <-- MUDANÇA 2: Usando isoformat() para salvar datas
+    params = (
+        nome, universidade, data_adm.isoformat(), 
+        data_renov.isoformat() if data_renov else None, 
+        obs, 
+        data_venc.isoformat() if data_venc else None
+    )
     execute_write_query(query, params)
     log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     query = "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?"
-    params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
+    # <-- MUDANÇA 2: Usando isoformat() para salvar datas
+    params = (
+        nome, universidade, data_adm.isoformat(), 
+        data_renov.isoformat() if data_renov else None, 
+        obs, 
+        data_venc.isoformat() if data_venc else None, 
+        est_id
+    )
     execute_write_query(query, params)
     log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
@@ -241,7 +254,7 @@ def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = N
     params = {}
     if start_date and end_date:
         query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id DESC LIMIT 50"
-        params = (str(start_date), str(end_date))
+        params = (start_date.isoformat(), end_date.isoformat())
     df = pd.read_sql_query(query, get_read_connection(), params=params)
     return df
 
@@ -250,7 +263,7 @@ def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[da
     params = {}
     if start_date and end_date:
         query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id ASC"
-        params = (str(start_date), str(end_date))
+        params = (start_date.isoformat(), end_date.isoformat())
     df = pd.read_sql_query(query, get_read_connection(), params=params)
     return df.to_string(index=False).encode('utf-8')
 
@@ -325,29 +338,35 @@ def page_cadastro():
     st.divider()
     if st.session_state.sub_menu_cad == "Novo":
         st.subheader("Cadastrar Novo Estagiário")
-        nome = st.text_input("Nome*", key="novo_nome").strip().upper()
-        universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...", key="novo_uni")
-        universidade = universidade_selecionada
-        if universidade_selecionada == "Outra (cadastrar manualmente)":
-            universidade = st.text_input("Digite o nome da Universidade*", key="novo_uni_manual").strip().upper()
-        c1, c2 = st.columns(2)
-        data_adm = c1.date_input("Data de Admissão*", key="novo_data_adm")
-        termo_meses = meses_por_universidade(universidade if universidade else "")
-        renov_disabled = (termo_meses >= 24)
-        data_renov = c2.date_input("Data da Última Renovação", value=None, disabled=renov_disabled, key="novo_data_renov")
-        if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-        obs = st.text_area("Observações", key="novo_obs").strip().upper()
-        c_submit, c_cancel = st.columns(2)
-        if c_submit.button("💾 Salvar Novo Estagiário", use_container_width=True, key="btn_salvar_novo"):
-            if not nome or not universidade or not data_adm:
-                st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
-            else:
-                data_venc = calcular_vencimento_final(data_adm)
-                insert_estagiario(nome, universidade, data_adm, data_renov if not renov_disabled else None, obs, data_venc)
-                st.session_state.message = {'text': f"Estagiário {nome} cadastrado!", 'type': 'success'}
-                st.session_state.sub_menu_cad = None
-            st.rerun()
-        if c_cancel.button("Cancelar", use_container_width=True, key="btn_cancelar_novo"):
+        # Usando um formulário para o cadastro também, para consistência
+        with st.form("form_novo", clear_on_submit=True):
+            nome = st.text_input("Nome*").strip().upper()
+            universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...")
+            universidade = universidade_selecionada
+            if universidade_selecionada == "Outra (cadastrar manualmente)":
+                universidade = st.text_input("Digite o nome da Universidade*").strip().upper()
+            
+            c1, c2 = st.columns(2)
+            data_adm = c1.date_input("Data de Admissão*")
+            
+            termo_meses = meses_por_universidade(universidade if universidade else "")
+            renov_disabled = (termo_meses >= 24)
+            data_renov = c2.date_input("Data da Última Renovação", value=None, disabled=renov_disabled)
+            if renov_disabled: c2.info("Contrato único. Não requer renovação.")
+            
+            obs = st.text_area("Observações").strip().upper()
+            
+            submitted = st.form_submit_button("💾 Salvar Novo Estagiário", use_container_width=True)
+            if submitted:
+                if not nome or not universidade or not data_adm:
+                    st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
+                else:
+                    data_venc = calcular_vencimento_final(data_adm)
+                    insert_estagiario(nome, universidade, data_adm, data_renov if not renov_disabled else None, obs, data_venc)
+                    st.session_state.message = {'text': f"Estagiário {nome} cadastrado!", 'type': 'success'}
+                st.rerun()
+
+        if st.button("Cancelar", use_container_width=True, key="btn_cancelar_novo"):
             st.session_state.sub_menu_cad = None
             st.rerun()
 
@@ -388,7 +407,6 @@ def page_cadastro():
                 obs_edit = st.text_area("Observações", value=st.session_state.edit_obs)
                 
                 submitted = st.form_submit_button("💾 Salvar Alterações", use_container_width=True)
-
                 if submitted:
                     if not nome_edit or not universidade_final or not data_adm_edit:
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
@@ -404,11 +422,9 @@ def page_cadastro():
                             data_venc
                         )
                         st.session_state.message = {'text': f"Dados de {nome_edit.strip().upper()} atualizados!", 'type': 'success'}
-                        
-                        st.session_state.sub_menu_cad = None
-                        st.session_state.id_para_editar = None
-                        st.session_state.current_edit_id = None
-                        st.rerun()
+                    
+                    # <-- MUDANÇA 4: Não limpa o estado, apenas recarrega a página.
+                    st.rerun()
 
             c_delete, c_cancel = st.columns(2)
             if c_delete.button("🗑️ Excluir Estagiário", use_container_width=True):
