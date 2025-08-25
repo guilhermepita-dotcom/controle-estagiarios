@@ -225,7 +225,6 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     data_ult_renov = row.get('data_ult_renovacao', pd.NaT).date() if pd.notna(row.get('data_ult_renovacao')) else None
     
     if not data_adm: return ""
-
     termo_meses = meses_por_universidade(row['universidade'])
     if termo_meses >= 24: return "Contrato único"
     
@@ -239,26 +238,31 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
 
-# <<< ALTERAÇÃO AQUI: Função de processamento agora recebe proximos_dias como argumento >>>
+# <<< ALTERAÇÃO AQUI: Função de Status refatorada para ser explícita e corrigir o bug >>>
+def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
+    """Função auxiliar para calcular o status de uma única linha."""
+    if row['proxima_renovacao'] == "Renovação Pendente": return "Vencido"
+    
+    data_alvo = pd.to_datetime(row['proxima_renovacao'], format='%d.%m.%Y', errors='coerce')
+    
+    if pd.isna(data_alvo): data_alvo = row['data_vencimento']
+        
+    if pd.isna(data_alvo): return "SEM DATA"
+        
+    delta = (data_alvo.date() - date.today()).days
+    if delta < 0: return "Vencido"
+    if delta <= proximos_dias: return "Venc.Proximo"
+    return "OK"
+
 def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataFrame:
     if df.empty: return df
-    
     df_proc = df.copy()
     
     df_proc['proxima_renovacao'] = df_proc.apply(calcular_proxima_renovacao, axis=1)
-
-    def determinar_status(row):
-        if row['proxima_renovacao'] == "Renovação Pendente": return "Vencido"
-        data_alvo = pd.to_datetime(row['proxima_renovacao'], format='%d.%m.%Y', errors='coerce')
-        if pd.isna(data_alvo): data_alvo = row['data_vencimento']
-        if pd.isna(data_alvo): return "SEM DATA"
-            
-        delta = (data_alvo.date() - date.today()).days
-        if delta < 0: return "Vencido"
-        if delta <= proximos_dias: return "Venc.Proximo"
-        return "OK"
-        
-    df_proc['status'] = df_proc.apply(determinar_status, axis=1)
+    
+    # Passa o argumento `proximos_dias` para a função apply
+    df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
+    
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
 
     regras_df = list_regras()
@@ -285,7 +289,6 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
     return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
-    # Código inalterado
     query = "SELECT timestamp, action, details FROM logs"
     params = {}
     if start_date and end_date:
@@ -295,7 +298,6 @@ def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = N
     return pd.read_sql_query(query, get_db_connection(), params=params)
 
 def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
-    # Código inalterado
     query = "SELECT timestamp, action, details FROM logs"
     params = {}
     if start_date and end_date:
@@ -306,7 +308,6 @@ def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[da
     return df.to_string(index=False).encode('utf-8')
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
-    # Código inalterado
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export = df.copy()
@@ -317,7 +318,6 @@ def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 def show_message(message: Dict[str, Any]):
-    # Código inalterado
     msg_type = message.get('type', 'info')
     text = message.get('text', 'Ação concluída.')
     icon_map = {'success': '✅', 'warning': '⚠️', 'error': '❌', 'info': 'ℹ️'}
@@ -342,7 +342,6 @@ def page_dashboard():
         st.info("Nenhum estagiário cadastrado ainda.")
         return
 
-    # <<< ALTERAÇÃO AQUI: Passa o valor do input diretamente para a função de processamento >>>
     df_display = processar_df_para_exibicao(df_raw, proximos_dias_input)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -502,7 +501,6 @@ def page_base():
         st.warning("Nenhum estagiário cadastrado para exibir.")
         return
     
-    # <<< ALTERAÇÃO AQUI: Usa o valor do config para a página Base >>>
     proximos_dias_config = int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS))
     df_display = processar_df_para_exibicao(df_raw, proximos_dias_config)
 
