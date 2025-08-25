@@ -92,21 +92,25 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 # ==========================
-# Banco de Dados
+# Banco de Dados (Nova Arquitetura)
 # ==========================
 @st.cache_resource
 def get_read_connection():
-    """Conexão em cache apenas para leitura de dados."""
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False, uri=True, isolation_level=None)
+    """Conexão em cache apenas para LEITURA de dados."""
+    conn = sqlite3.connect(f'file:{DB_FILE}?mode=ro', check_same_thread=False, uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
 def execute_write_query(query: str, params: tuple = ()):
-    """Função segura para todas as operações de escrita (INSERT, UPDATE, DELETE)."""
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.execute(query, params)
-        conn.commit()
-    st.cache_resource.clear()
+    """Função segura para todas as operações de ESCRITA (INSERT, UPDATE, DELETE)."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute(query, params)
+            conn.commit()
+        # Após a escrita, limpa o cache da conexão de leitura para forçar a recarga.
+        st.cache_resource.clear()
+    except sqlite3.Error as e:
+        st.error(f"Erro ao escrever no banco de dados: {e}")
 
 def init_db():
     # Usa a função de escrita para garantir a criação das tabelas
@@ -143,7 +147,7 @@ def set_config(key: str, value: str):
     execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
 
 # ==========================
-# Funções de Lógica e CRUD
+# Funções de Lógica e CRUD (Adaptadas para a nova arquitetura)
 # ==========================
 def log_action(action: str, details: str = ""):
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
@@ -188,35 +192,41 @@ def delete_estagiario(est_id: int, nome: str):
     execute_write_query("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
+# O restante do código (lógica de cálculo, páginas e main) permanece o mesmo,
+# pois as chamadas às funções de CRUD não mudaram.
+def normalize_text(text: str) -> str:
+    if not isinstance(text, str): return ""
+    return "".join(c for c in unicodedata.normalize('NFD', text.lower()) if unicodedata.category(c) != 'Mn')
+
 def meses_por_universidade(universidade: str) -> int:
-    # Função inalterada
     if not universidade: return DEFAULT_DURATION_OTHERS
     df_regras = list_regras()
     regras_dict = {row["keyword"]: int(row["meses"]) for _, row in df_regras.iterrows()}
     return regras_dict.get(universidade.upper(), DEFAULT_DURATION_OTHERS)
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
-    # Função inalterada
     return data_adm + relativedelta(months=24) if data_adm else None
 
 def calcular_proxima_renovacao(row: pd.Series) -> str:
-    # Função inalterada
     hoje = date.today()
     data_adm = row['data_admissao'].date() if pd.notna(row['data_admissao']) else None
     data_ult_renov = row.get('data_ult_renovacao', pd.NaT).date() if pd.notna(row.get('data_ult_renovacao')) else None
+    
     if not data_adm: return ""
     termo_meses = meses_por_universidade(row['universidade'])
     if termo_meses >= 24: return "Contrato único"
+    
     limite_2_anos = data_adm + relativedelta(months=24)
     if limite_2_anos < hoje: return "Contrato Encerrado"
+    
     base_date = data_ult_renov if data_ult_renov else data_adm
     proxima_data_renovacao = base_date + relativedelta(months=6)
+
     if proxima_data_renovacao > limite_2_anos: return "Término do Contrato"
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
 
 def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
-    # Função inalterada
     if row['proxima_renovacao'] == "Renovação Pendente": return "Vencido"
     data_alvo = pd.to_datetime(row['proxima_renovacao'], format='%d.%m.%Y', errors='coerce')
     if pd.isna(data_alvo): data_alvo = row['data_vencimento']
@@ -227,30 +237,36 @@ def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
     return "OK"
 
 def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataFrame:
-    # Função inalterada
     if df.empty: return df
     df_proc = df.copy()
     df_proc['proxima_renovacao'] = df_proc.apply(calcular_proxima_renovacao, axis=1)
     df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
+
     regras_df = list_regras()
     regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
     df_proc['data_ult_renovacao_str'] = ''
     if regras_24m_keywords:
         mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
         df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
-    df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
+    
+    df_proc['data_ult_renovacao_str'] = df_proc.apply(
+        lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
+                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
+        axis=1)
+
     for col in ["data_admissao", "data_vencimento"]:
         df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
+
     df_proc = df_proc.rename(columns={
         'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
         'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
         'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
     })
+    
     return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
-    # Código inalterado
     query = "SELECT timestamp, action, details FROM logs ORDER BY id DESC LIMIT 50"
     params = {}
     if start_date and end_date:
@@ -260,7 +276,6 @@ def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = N
     return df
 
 def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
-    # Código inalterado
     query = "SELECT timestamp, action, details FROM logs ORDER BY id ASC"
     params = {}
     if start_date and end_date:
@@ -270,7 +285,6 @@ def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[da
     return df.to_string(index=False).encode('utf-8')
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
-    # Código inalterado
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export = df.copy()
@@ -281,17 +295,13 @@ def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 def show_message(message: Dict[str, Any]):
-    # Código inalterado
     msg_type = message.get('type', 'info')
     text = message.get('text', 'Ação concluída.')
     icon_map = {'success': '✅', 'warning': '⚠️', 'error': '❌', 'info': 'ℹ️'}
     st.toast(text, icon=icon_map.get(msg_type, 'ℹ️'))
 
-# ===============================================
-# SEÇÕES DA APLICAÇÃO (PÁGINAS)
-# ===============================================
 def page_dashboard():
-    # Código inalterado
+    # Código inalterado, pois as chamadas já estão corretas
     st.header("Dashboard de Contratos")
     proximos_dias_input = st.number_input(
         "'Venc. Próximo' (dias)", min_value=1, max_value=120, 
@@ -329,7 +339,7 @@ def page_dashboard():
         st.info("ℹ️ Utilize os filtros acima para pesquisar e exibir os dados dos estagiários.")
 
 def page_cadastro():
-    # Código inalterado
+    # Código inalterado, pois as chamadas já estão corretas
     st.header("Gerenciar Estagiários")
     if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
     if 'message' in st.session_state and st.session_state.message:
