@@ -373,9 +373,11 @@ def page_cadastro():
     cols = st.columns(2)
     if cols[0].button("➕ Novo Estagiário", use_container_width=True, key="btn_novo_estagiario"): 
         st.session_state.sub_menu_cad = "Novo"
+        st.session_state.id_para_editar = None
         st.rerun()
     if cols[1].button("🔎 Consultar / Editar", use_container_width=True, key="btn_consultar_estagiario"): 
         st.session_state.sub_menu_cad = "Editar"
+        st.session_state.id_para_editar = None
         st.rerun()
     st.divider()
 
@@ -415,50 +417,15 @@ def page_cadastro():
             st.session_state.sub_menu_cad = None
             st.rerun()
 
+    # <<< ALTERAÇÃO AQUI: Lógica de busca e edição com estado explícito >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
-        if df_estagiarios.empty:
-            st.info("Nenhum estagiário para editar.")
-            return
 
-        search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
-        
-        est_data_para_edicao = None
-        if search_term.strip():
-            normalized_search = normalize_text(search_term.strip())
-            df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
-            df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalized_search, na=False)].copy()
-            df_results.reset_index(drop=True, inplace=True)
-
-            if df_results.empty:
-                st.warning("Nenhum estagiário encontrado com esse nome.")
-            
-            elif len(df_results) == 1:
-                st.success(f"Estagiário encontrado: {df_results.iloc[0]['nome']}")
-                est_data_para_edicao = df_results.iloc[0]
-
-            else:
-                st.info(f"{len(df_results)} estagiários encontrados. Por favor, selecione um da tabela abaixo para editar.")
-                st.data_editor(
-                    df_results[['id', 'nome', 'universidade']], 
-                    use_container_width=True, 
-                    hide_index=True,
-                    key="editor_selecao",
-                    disabled=['id', 'nome', 'universidade']
-                )
-
-                if ('editor_selecao' in st.session_state and 
-                    'selection' in st.session_state.editor_selecao and 
-                    st.session_state.editor_selecao['selection']['rows']):
-                    selected_row_index = st.session_state.editor_selecao["selection"]["rows"][0]
-                    selected_id = df_results.iloc[selected_row_index]['id']
-                    est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == selected_id].iloc[0]
-        
-        if est_data_para_edicao is not None:
-            st.divider()
+        # Se um estagiário já foi selecionado para edição, mostra o formulário
+        if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
+            est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
-            
             with st.form("form_edit_cadastro"):
                 nome = st.text_input("Nome*", value=est_data_para_edicao["nome"]).strip().upper()
                 
@@ -474,10 +441,8 @@ def page_cadastro():
                 c1, c2 = st.columns(2)
                 data_adm = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"])
                 
-                # <<< ALTERAÇÃO AQUI: Verifica se a data de renovação é válida antes de passar para o widget >>>
                 valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
-                if pd.isna(valor_data_renov):
-                    valor_data_renov = None
+                if pd.isna(valor_data_renov): valor_data_renov = None
 
                 data_renov = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled)
                 if renov_disabled: c2.info("Contrato único. Não requer renovação.")
@@ -490,19 +455,21 @@ def page_cadastro():
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     else:
                         data_venc = calcular_vencimento_final(data_adm)
-                        update_estagiario(est_data_para_edicao['id'], nome, universidade, data_adm, data_renov if not renov_disabled else None, obs, data_venc)
+                        update_estagiario(st.session_state.id_para_editar, nome, universidade, data_adm, data_renov if not renov_disabled else None, obs, data_venc)
                         st.session_state.message = {'text': f"Dados de {nome} atualizados!", 'type': 'success'}
                         st.session_state.sub_menu_cad = None
+                        st.session_state.id_para_editar = None
                     st.rerun()
 
                 if c_delete.form_submit_button("🗑️ Excluir Estagiário", use_container_width=True):
-                    st.session_state.confirm_delete_id = {'id': est_data_para_edicao['id'], 'nome': nome}
+                    st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': nome}
                     st.rerun()
 
-                if c_cancel.form_submit_button("Cancelar", use_container_width=True):
-                    st.session_state.sub_menu_cad = None
+                if c_cancel.form_submit_button("Cancelar Edição", use_container_width=True):
+                    st.session_state.id_para_editar = None
                     st.rerun()
             
+            # Lógica de confirmação de exclusão
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
                 data_to_delete = st.session_state.confirm_delete_id
                 st.warning(f"Tem certeza que deseja excluir **{data_to_delete['nome']}**? Esta ação não pode ser desfeita.")
@@ -511,11 +478,54 @@ def page_cadastro():
                     delete_estagiario(data_to_delete['id'], data_to_delete['nome'])
                     st.session_state.message = {'text': 'Estagiário excluído com sucesso!', 'type': 'success'}
                     st.session_state.confirm_delete_id = None
+                    st.session_state.id_para_editar = None
                     st.session_state.sub_menu_cad = None
                     st.rerun()
                 if c2.button("NÃO, CANCELAR", key="cancel_del_btn"):
                     st.session_state.confirm_delete_id = None
                     st.rerun()
+        
+        # Se nenhum estagiário estiver selecionado, mostra a interface de busca
+        else:
+            if df_estagiarios.empty:
+                st.info("Nenhum estagiário para editar.")
+                return
+
+            search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
+            
+            if search_term.strip():
+                normalized_search = normalize_text(search_term.strip())
+                df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
+                df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalized_search, na=False)].copy()
+                df_results.reset_index(drop=True, inplace=True)
+
+                if df_results.empty:
+                    st.warning("Nenhum estagiário encontrado com esse nome.")
+                
+                elif len(df_results) == 1:
+                    st.success(f"Estagiário encontrado: {df_results.iloc[0]['nome']}. Carregando formulário de edição...")
+                    st.session_state.id_para_editar = df_results.iloc[0]['id']
+                    st.rerun()
+
+                else:
+                    st.info(f"{len(df_results)} estagiários encontrados. Por favor, selecione um da tabela abaixo para editar.")
+                    df_results['data_admissao_str'] = df_results['data_admissao'].dt.strftime('%d/%m/%Y')
+                    df_results['data_vencimento_str'] = df_results['data_vencimento'].dt.strftime('%d/%m/%Y')
+                    
+                    st.data_editor(
+                        df_results[['id', 'nome', 'universidade', 'data_admissao_str', 'data_vencimento_str']], 
+                        use_container_width=True, 
+                        hide_index=True,
+                        key="editor_selecao",
+                        disabled=df_results.columns
+                    )
+
+                    if ('editor_selecao' in st.session_state and 
+                        'selection' in st.session_state.editor_selecao and 
+                        st.session_state.editor_selecao['selection']['rows']):
+                        selected_row_index = st.session_state.editor_selecao["selection"]["rows"][0]
+                        st.session_state.id_para_editar = df_results.iloc[selected_row_index]['id']
+                        st.rerun()
 
 
 def page_regras():
@@ -715,7 +725,7 @@ def main():
     
     if 'main_selection' not in st.session_state or selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
-        keys_to_reset = ['sub_menu_cad', 'confirm_delete_id', 'rule_to_delete']
+        keys_to_reset = ['sub_menu_cad', 'confirm_delete_id', 'rule_to_delete', 'id_para_editar']
         for key in keys_to_reset:
             if key in st.session_state:
                 st.session_state[key] = None
