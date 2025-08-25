@@ -5,3 +5,4 @@ Pillow
 openpyxl
 streamlit-option-menu
 pytz
+libsql-client
