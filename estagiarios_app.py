@@ -2,7 +2,7 @@ import os
 from datetime import date, datetime
 from typing import Optional, Dict, Any
 import io
-import unicodedata  # Adicionado para a busca inteligente
+import unicodedata
 
 import pandas as pd
 import sqlite3
@@ -415,7 +415,6 @@ def page_cadastro():
             st.session_state.sub_menu_cad = None
             st.rerun()
 
-    # <<< ALTERAÇÃO AQUI: Nova lógica de busca e edição automática >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
         if df_estagiarios.empty:
@@ -426,22 +425,18 @@ def page_cadastro():
         
         est_data_para_edicao = None
         if search_term.strip():
-            # Realiza a busca normalizada (sem acento e case-insensitive)
             normalized_search = normalize_text(search_term.strip())
             df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
             df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalized_search, na=False)].copy()
             df_results.reset_index(drop=True, inplace=True)
 
-            # Caso 1: Nenhum resultado
             if df_results.empty:
                 st.warning("Nenhum estagiário encontrado com esse nome.")
             
-            # Caso 2: Exatamente um resultado, abre a edição
             elif len(df_results) == 1:
                 st.success(f"Estagiário encontrado: {df_results.iloc[0]['nome']}")
                 est_data_para_edicao = df_results.iloc[0]
 
-            # Caso 3: Múltiplos resultados, pede para o usuário selecionar
             else:
                 st.info(f"{len(df_results)} estagiários encontrados. Por favor, selecione um da tabela abaixo para editar.")
                 st.data_editor(
@@ -459,7 +454,6 @@ def page_cadastro():
                     selected_id = df_results.iloc[selected_row_index]['id']
                     est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == selected_id].iloc[0]
         
-        # Se um estagiário foi selecionado (ou encontrado), mostra o formulário de edição
         if est_data_para_edicao is not None:
             st.divider()
             
@@ -479,7 +473,13 @@ def page_cadastro():
                 
                 c1, c2 = st.columns(2)
                 data_adm = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"])
-                data_renov = c2.date_input("Data da Última Renovação", value=est_data_para_edicao["data_ult_renovacao"], disabled=renov_disabled)
+                
+                # <<< ALTERAÇÃO AQUI: Verifica se a data de renovação é válida antes de passar para o widget >>>
+                valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
+                if pd.isna(valor_data_renov):
+                    valor_data_renov = None
+
+                data_renov = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled)
                 if renov_disabled: c2.info("Contrato único. Não requer renovação.")
                 
                 obs = st.text_area("Observações", value=est_data_para_edicao.get("obs", "")).strip().upper()
