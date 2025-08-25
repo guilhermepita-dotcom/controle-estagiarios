@@ -271,6 +271,7 @@ def show_message(message: Dict[str, Any]):
     st.toast(text, icon=icon_map.get(msg_type, 'ℹ️'))
 
 def page_dashboard():
+    # Código inalterado
     st.header("Dashboard de Contratos")
     proximos_dias_input = st.number_input(
         "'Venc. Próximo' (dias)", min_value=1, max_value=120, 
@@ -350,7 +351,7 @@ def page_cadastro():
         if c_cancel.button("Cancelar", use_container_width=True, key="btn_cancelar_novo"):
             st.session_state.sub_menu_cad = None
             st.rerun()
-
+            
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
 
@@ -360,34 +361,42 @@ def page_cadastro():
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
 
             # Renderiza os widgets com valores default do banco de dados e uma chave única
-            nome_edit = st.text_input("Nome*", value=est_data_para_edicao["nome"], key="edit_nome").strip().upper()
+            # O retorno do widget é atribuído a uma variável
+            nome_edit = st.text_input("Nome*", value=est_data_para_edicao["nome"], key=f"edit_nome_{st.session_state.id_para_editar}")
             uni_default = est_data_para_edicao.get("universidade")
             uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
-            universidade_edit = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="edit_universidade")
+            universidade_edit = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key=f"edit_universidade_{st.session_state.id_para_editar}")
             
             if universidade_edit == "Outra (cadastrar manualmente)":
-                universidade_edit = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="edit_universidade_manual").strip().upper()
+                universidade_edit = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key=f"edit_universidade_manual_{st.session_state.id_para_editar}")
             
             termo_meses = meses_por_universidade(universidade_edit if universidade_edit else "")
             renov_disabled = (termo_meses >= 24)
             c1, c2 = st.columns(2)
-            data_adm_edit = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"], key="edit_data_adm")
+            data_adm_edit = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"], key=f"edit_data_adm_{st.session_state.id_para_editar}")
             valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
             if pd.isna(valor_data_renov): valor_data_renov = None
-            data_renov_edit = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled, key="edit_data_renov")
+            data_renov_edit = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled, key=f"edit_data_renov_{st.session_state.id_para_editar}")
             if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-            obs_edit = st.text_area("Observações", value=est_data_para_edicao.get("obs", ""), key="edit_obs").strip().upper()
+            obs_edit = st.text_area("Observações", value=est_data_para_edicao.get("obs", ""), key=f"edit_obs_{st.session_state.id_para_editar}")
             
             c_save, c_delete, c_cancel = st.columns([2, 2, 1])
 
             if c_save.button("💾 Salvar Alterações", use_container_width=True):
-                if not nome_edit or not universidade_edit or not data_adm_edit:
+                # Usa as variáveis que receberam o retorno dos widgets
+                nome_final = nome_edit.strip().upper()
+                universidade_final = universidade_edit.strip().upper()
+                data_adm_final = data_adm_edit
+                data_renov_final = data_renov_edit
+                obs_final = obs_edit.strip().upper()
+
+                if not nome_final or not universidade_final or not data_adm_final:
                     st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     st.rerun()
                 else:
-                    data_venc = calcular_vencimento_final(data_adm_edit)
-                    update_estagiario(st.session_state.id_para_editar, nome_edit, universidade_edit, data_adm_edit, data_renov_edit if not renov_disabled else None, obs_edit, data_venc)
-                    st.session_state.message = {'text': f"Dados de {nome_edit} atualizados!", 'type': 'success'}
+                    data_venc = calcular_vencimento_final(data_adm_final)
+                    update_estagiario(st.session_state.id_para_editar, nome_final, universidade_final, data_adm_final, data_renov_final if not renov_disabled else None, obs_final, data_venc)
+                    st.session_state.message = {'text': f"Dados de {nome_final} atualizados!", 'type': 'success'}
                     st.session_state.id_para_editar = None
                     st.session_state.sub_menu_cad = None
                     st.rerun()
