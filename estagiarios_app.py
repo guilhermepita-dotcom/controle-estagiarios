@@ -18,7 +18,6 @@ DB_FILE = "estagiarios.db"
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
-DEFAULT_REGRAS = []
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
 universidades_padrao = [
@@ -670,3 +669,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
