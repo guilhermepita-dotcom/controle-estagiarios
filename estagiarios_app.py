@@ -97,7 +97,7 @@ def load_custom_css():
                 padding: 20px; border-left: 5px solid var(--primary-color);
                 box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
             }
-            form, [data-testid="stExpander"] {
+            div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column;"] > div[data-testid="stForm"] {
                 background-color: var(--secondary-background-color); border-radius: 10px;
                 padding: 25px; border: 1px solid #333;
             }
@@ -364,41 +364,52 @@ def page_cadastro():
         st.session_state.message = None
 
     cols = st.columns(2)
-    if cols[0].button("➕ Novo Estagiário", use_container_width=True): st.session_state.sub_menu_cad = "Novo"
-    if cols[1].button("🔎 Consultar / Editar", use_container_width=True): st.session_state.sub_menu_cad = "Editar"
+    if cols[0].button("➕ Novo Estagiário", use_container_width=True, key="btn_novo_estagiario"): 
+        st.session_state.sub_menu_cad = "Novo"
+        st.rerun() # Garante a atualização da interface
+    if cols[1].button("🔎 Consultar / Editar", use_container_width=True, key="btn_consultar_estagiario"): 
+        st.session_state.sub_menu_cad = "Editar"
+        st.rerun()
     st.divider()
 
+    # <<< ALTERAÇÃO AQUI: Lógica de formulário dinâmico para "Novo Estagiário" >>>
     if st.session_state.sub_menu_cad == "Novo":
-        with st.form("form_new_cadastro"):
-            st.subheader("Cadastrar Novo Estagiário")
-            nome = st.text_input("Nome*").strip().upper()
-            
-            universidade = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...")
-            if universidade == "Outra (cadastrar manualmente)":
-                universidade = st.text_input("Digite o nome da Universidade*").strip().upper()
+        st.subheader("Cadastrar Novo Estagiário")
+        
+        nome = st.text_input("Nome*", key="novo_nome").strip().upper()
+        
+        universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...", key="novo_uni")
+        universidade = universidade_selecionada
+        if universidade_selecionada == "Outra (cadastrar manualmente)":
+            universidade = st.text_input("Digite o nome da Universidade*", key="novo_uni_manual").strip().upper()
 
-            c1, c2 = st.columns(2)
-            data_adm = c1.date_input("Data de Admissão*")
-            termo_meses = meses_por_universidade(universidade if universidade else "")
-            data_renov = c2.date_input("Data da Última Renovação", value=None, disabled=(termo_meses >= 24))
-            if termo_meses >= 24: c2.info("Contrato único. Não requer renovação.")
-            obs = st.text_area("Observações").strip().upper()
-            
-            c_submit, c_cancel = st.columns(2)
-            if c_submit.form_submit_button("💾 Salvar Novo Estagiário", use_container_width=True):
-                if not nome or not universidade or not data_adm:
-                    st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
-                else:
-                    data_venc = calcular_vencimento_final(data_adm)
-                    insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
-                    st.session_state.message = {'text': f"Estagiário {nome} cadastrado!", 'type': 'success'}
-                    st.session_state.sub_menu_cad = None
-                st.rerun()
-            if c_cancel.form_submit_button("Cancelar", use_container_width=True):
+        c1, c2 = st.columns(2)
+        data_adm = c1.date_input("Data de Admissão*", key="novo_data_adm")
+        
+        termo_meses = meses_por_universidade(universidade if universidade else "")
+        renov_disabled = (termo_meses >= 24)
+        
+        data_renov = c2.date_input("Data da Última Renovação", value=None, disabled=renov_disabled, key="novo_data_renov")
+        if renov_disabled: c2.info("Contrato único. Não requer renovação.")
+        
+        obs = st.text_area("Observações", key="novo_obs").strip().upper()
+        
+        c_submit, c_cancel = st.columns(2)
+        if c_submit.button("💾 Salvar Novo Estagiário", use_container_width=True, key="btn_salvar_novo"):
+            if not nome or not universidade or not data_adm:
+                st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
+            else:
+                data_venc = calcular_vencimento_final(data_adm)
+                insert_estagiario(nome, universidade, data_adm, data_renov if not renov_disabled else None, obs, data_venc)
+                st.session_state.message = {'text': f"Estagiário {nome} cadastrado!", 'type': 'success'}
                 st.session_state.sub_menu_cad = None
-                st.rerun()
+            st.rerun()
+            
+        if c_cancel.button("Cancelar", use_container_width=True, key="btn_cancelar_novo"):
+            st.session_state.sub_menu_cad = None
+            st.rerun()
 
-    # <<< ALTERAÇÃO AQUI: Lógica de busca no lugar da lista completa >>>
+    # <<< ALTERAÇÃO AQUI: Lógica de busca com tabela para "Consultar / Editar" >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
         if df_estagiarios.empty:
@@ -407,21 +418,24 @@ def page_cadastro():
 
         search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
         
-        nome_selecionado = None
+        nome_selecionado_para_edicao = None
         if search_term.strip():
             df_results = df_estagiarios[df_estagiarios["nome"].str.contains(search_term.strip(), case=False, na=False)]
             if not df_results.empty:
+                st.dataframe(df_results[['id', 'nome', 'universidade']], use_container_width=True, hide_index=True)
                 nomes_encontrados = df_results["nome"].tolist()
-                nome_selecionado = st.selectbox("Selecione o estagiário encontrado", options=nomes_encontrados, index=None, placeholder="Clique para selecionar...")
+                nome_selecionado_para_edicao = st.selectbox("Selecione o estagiário da tabela acima para editar", options=nomes_encontrados, index=None, placeholder="Clique para selecionar...")
             else:
                 st.warning("Nenhum estagiário encontrado com esse nome.")
         
-        if nome_selecionado:
-            id_selecionado = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
-            est_data = df_estagiarios[df_estagiarios['id'] == id_selecionado].iloc[0]
-
+        if nome_selecionado_para_edicao:
+            # Puxa os dados do estagiário selecionado
+            est_data = df_estagiarios[df_estagiarios["nome"] == nome_selecionado_para_edicao].iloc[0]
+            st.divider()
+            
+            st.subheader(f"Editando: {est_data['nome']}")
+            
             with st.form("form_edit_cadastro"):
-                st.subheader(f"Editando: {est_data['nome']}")
                 nome = st.text_input("Nome*", value=est_data["nome"]).strip().upper()
                 
                 uni_default = est_data.get("universidade")
@@ -431,10 +445,13 @@ def page_cadastro():
                     universidade = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "").strip().upper()
 
                 termo_meses = meses_por_universidade(universidade if universidade else "")
+                renov_disabled = (termo_meses >= 24)
+                
                 c1, c2 = st.columns(2)
                 data_adm = c1.date_input("Data de Admissão*", value=est_data["data_admissao"])
-                data_renov = c2.date_input("Data da Última Renovação", value=est_data["data_ult_renovacao"], disabled=(termo_meses >= 24))
-                if termo_meses >= 24: c2.info("Contrato único. Não requer renovação.")
+                data_renov = c2.date_input("Data da Última Renovação", value=est_data["data_ult_renovacao"], disabled=renov_disabled)
+                if renov_disabled: c2.info("Contrato único. Não requer renovação.")
+                
                 obs = st.text_area("Observações", value=est_data.get("obs", "")).strip().upper()
                 
                 c_save, c_delete, c_cancel = st.columns([2, 2, 1])
@@ -443,13 +460,14 @@ def page_cadastro():
                         st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     else:
                         data_venc = calcular_vencimento_final(data_adm)
-                        update_estagiario(id_selecionado, nome, universidade, data_adm, data_renov, obs, data_venc)
+                        update_estagiario(est_data['id'], nome, universidade, data_adm, data_renov if not renov_disabled else None, obs, data_venc)
                         st.session_state.message = {'text': f"Dados de {nome} atualizados!", 'type': 'success'}
                         st.session_state.sub_menu_cad = None
                     st.rerun()
 
                 if c_delete.form_submit_button("🗑️ Excluir Estagiário", use_container_width=True):
-                    st.session_state.confirm_delete_id = {'id': id_selecionado, 'nome': nome}
+                    st.session_state.confirm_delete_id = {'id': est_data['id'], 'nome': nome}
+                    st.rerun()
 
                 if c_cancel.form_submit_button("Cancelar", use_container_width=True):
                     st.session_state.sub_menu_cad = None
@@ -472,47 +490,60 @@ def page_cadastro():
 def page_regras():
     st.header("Gerenciar Regras de Contrato")
     st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses). Universidades sem regra específica usarão o padrão de 6 meses.")
+    
     if 'message_rule' in st.session_state and st.session_state.message_rule:
         show_message(st.session_state.message_rule)
         st.session_state.message_rule = None
     
-    df_regras = list_regras()
-    if df_regras.empty:
-        st.info("Nenhuma regra personalizada cadastrada.")
+    # <<< ALTERAÇÃO AQUI: Lógica de confirmação de exclusão >>>
+    if 'rule_to_delete' in st.session_state and st.session_state.rule_to_delete:
+        rule = st.session_state.rule_to_delete
+        st.warning(f"Tem certeza que deseja excluir a regra para **{rule['keyword']}**?")
+        c1, c2, _ = st.columns([1, 1, 3])
+        if c1.button("SIM, EXCLUIR REGRA"):
+            delete_regra(rule['id'], rule['keyword'])
+            st.session_state.message_rule = {'text': f"Regra para {rule['keyword']} excluída!", 'type': 'success'}
+            st.session_state.rule_to_delete = None
+            st.rerun()
+        if c2.button("NÃO, CANCELAR"):
+            st.session_state.rule_to_delete = None
+            st.rerun()
+
     else:
-        st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Duração (Meses)"}))
-    st.divider()
+        df_regras = list_regras()
+        if df_regras.empty:
+            st.info("Nenhuma regra personalizada cadastrada.")
+        else:
+            st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Duração (Meses)"}))
+        st.divider()
 
-    c1, c2 = st.columns(2)
-    with c1:
-        with st.form("form_add_edit_regra"):
-            st.subheader("Adicionar / Editar Regra")
-            keyword_raw = st.selectbox("Universidade", options=universidades_padrao, index=None, placeholder="Selecione para adicionar ou editar...")
-            if keyword_raw == "Outra (cadastrar manualmente)":
-                keyword_raw = st.text_input("Digite o Nome ou Palavra-chave da Universidade")
-            
-            meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
-            
-            if st.form_submit_button("Salvar Regra", use_container_width=True) and keyword_raw:
-                add_regra(keyword_raw, meses)
-                st.session_state.message_rule = {'text': f"Regra para '{keyword_raw}' salva!", 'type': 'success'}
-                st.rerun()
-
-    with c2:
-        with st.form("form_delete_regra"):
-            st.subheader("Excluir Regra")
-            if not df_regras.empty:
-                opcoes = {f"{r['keyword']} ({r['meses']} meses)": r['id'] for _, r in df_regras.iterrows()}
-                regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
-                if st.form_submit_button("🗑️ Excluir Regra Selecionada", use_container_width=True):
-                    id_to_delete = opcoes[regra_para_deletar_str]
-                    keyword_to_delete = regra_para_deletar_str.split(' (')[0]
-                    delete_regra(id_to_delete, keyword_to_delete)
-                    st.session_state.message_rule = {'text': f"Regra '{keyword_to_delete}' excluída!", 'type': 'success'}
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.form("form_add_edit_regra"):
+                st.subheader("Adicionar / Editar Regra")
+                keyword_raw = st.selectbox("Universidade", options=universidades_padrao, index=None, placeholder="Selecione para adicionar ou editar...")
+                if keyword_raw == "Outra (cadastrar manualmente)":
+                    keyword_raw = st.text_input("Digite o Nome ou Palavra-chave da Universidade")
+                
+                meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
+                
+                if st.form_submit_button("Salvar Regra", use_container_width=True) and keyword_raw:
+                    add_regra(keyword_raw, meses)
+                    st.session_state.message_rule = {'text': f"Regra para '{keyword_raw}' salva!", 'type': 'success'}
                     st.rerun()
-            else:
-                st.selectbox("Selecione a regra para excluir", [], disabled=True)
-                st.form_submit_button("🗑️ Excluir Regra Selecionada", disabled=True, use_container_width=True)
+
+        with c2:
+            with st.form("form_delete_regra"):
+                st.subheader("Excluir Regra")
+                if not df_regras.empty:
+                    opcoes = {f"{r['keyword']} ({r['meses']} meses)": {"id": r['id'], "keyword": r['keyword']} for _, r in df_regras.iterrows()}
+                    regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
+                    if st.form_submit_button("🗑️ Excluir Regra Selecionada", use_container_width=True):
+                        st.session_state.rule_to_delete = opcoes[regra_para_deletar_str]
+                        st.rerun()
+                else:
+                    st.selectbox("Selecione a regra para excluir", [], disabled=True)
+                    st.form_submit_button("🗑️ Excluir Regra Selecionada", disabled=True, use_container_width=True)
 
 
 def page_import_export():
@@ -631,7 +662,6 @@ def main():
     if os.path.exists(LOGO_FILE): c1.image(LOGO_FILE, width=150)
     
     with c2:
-        # <<< ALTERAÇÃO AQUI: Adição da barra inferior no estilo do menu >>>
         selected = option_menu(
             menu_title=None,
             options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
@@ -655,7 +685,7 @@ def main():
     
     if 'main_selection' not in st.session_state or selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
-        keys_to_reset = ['sub_menu_cad', 'confirm_delete_id']
+        keys_to_reset = ['sub_menu_cad', 'confirm_delete_id', 'rule_to_delete']
         for key in keys_to_reset:
             if key in st.session_state:
                 st.session_state[key] = None
