@@ -96,58 +96,36 @@ def load_custom_css():
 # ==========================
 @st.cache_resource
 def get_read_connection():
-    """Conexão em cache apenas para LEITURA de dados, em modo read-only (ro)."""
     try:
-        # Tenta conectar em modo read-only
         conn = sqlite3.connect(f'file:{DB_FILE}?mode=ro', check_same_thread=False, uri=True)
         conn.row_factory = sqlite3.Row
         return conn
     except sqlite3.OperationalError:
-        # Se o modo read-only falhar (ex: na primeira execução quando o DB não existe), usa o modo normal.
         conn = sqlite3.connect(DB_FILE, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn
 
 def execute_write_query(query: str, params: tuple = ()):
-    """Função segura para todas as operações de ESCRITA (INSERT, UPDATE, DELETE)."""
     try:
-        # Conecta, executa, comita e fecha. Usa modo WAL para mais robustez.
         with sqlite3.connect(DB_FILE, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
-        # Após a escrita, limpa o cache da conexão de leitura para forçar a recarga.
         st.cache_resource.clear()
     except sqlite3.Error as e:
         st.error(f"Erro ao escrever no banco de dados: {e}")
         st.stop()
 
 def init_db():
-    # A função execute_write_query agora cuida da criação e commits.
-    execute_write_query("""
-        CREATE TABLE IF NOT EXISTS estagiarios (
-            id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL,
-            data_admissao TEXT NOT NULL, data_ult_renovacao TEXT,
-            obs TEXT, data_vencimento TEXT
-        )
-    """)
+    execute_write_query("CREATE TABLE IF NOT EXISTS estagiarios (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL, data_admissao TEXT NOT NULL, data_ult_renovacao TEXT, obs TEXT, data_vencimento TEXT)")
     execute_write_query("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     execute_write_query("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
-    execute_write_query("""
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
-            action TEXT NOT NULL, details TEXT
-        )
-    """)
+    execute_write_query("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, action TEXT NOT NULL, details TEXT)")
     if not get_config('regras_iniciadas'):
-        for kw, meses in DEFAULT_REGRAS:
-            add_regra(kw.upper(), meses)
+        for kw, meses in DEFAULT_REGRAS: add_regra(kw.upper(), meses)
         set_config('regras_iniciadas', 'true')
-    
-    if not get_config('proximos_dias'):
-        set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
-    if not get_config('admin_password'):
-        set_config('admin_password', '123456')
+    if not get_config('proximos_dias'): set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
+    if not get_config('admin_password'): set_config('admin_password', '123456')
 
 def get_config(key: str, default: Optional[str] = None) -> str:
     row = get_read_connection().execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
@@ -157,7 +135,7 @@ def set_config(key: str, value: str):
     execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
 
 # ==========================
-# Funções de Lógica e CRUD (Adaptadas para a nova arquitetura)
+# Funções de Lógica e CRUD
 # ==========================
 def log_action(action: str, details: str = ""):
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
@@ -201,9 +179,6 @@ def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date,
 def delete_estagiario(est_id: int, nome: str):
     execute_write_query("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
-    
-# O restante do código, que não mexe diretamente com a conexão do banco de dados, permanece inalterado.
-# (Funções de cálculo, lógica de exibição das páginas, etc.)
 
 def normalize_text(text: str) -> str:
     if not isinstance(text, str): return ""
@@ -222,17 +197,13 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     hoje = date.today()
     data_adm = row['data_admissao'].date() if pd.notna(row['data_admissao']) else None
     data_ult_renov = row.get('data_ult_renovacao', pd.NaT).date() if pd.notna(row.get('data_ult_renovacao')) else None
-    
     if not data_adm: return ""
     termo_meses = meses_por_universidade(row['universidade'])
     if termo_meses >= 24: return "Contrato único"
-    
     limite_2_anos = data_adm + relativedelta(months=24)
     if limite_2_anos < hoje: return "Contrato Encerrado"
-    
     base_date = data_ult_renov if data_ult_renov else data_adm
     proxima_data_renovacao = base_date + relativedelta(months=6)
-
     if proxima_data_renovacao > limite_2_anos: return "Término do Contrato"
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
@@ -253,28 +224,16 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
     df_proc['proxima_renovacao'] = df_proc.apply(calcular_proxima_renovacao, axis=1)
     df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
-
     regras_df = list_regras()
     regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
     df_proc['data_ult_renovacao_str'] = ''
     if regras_24m_keywords:
         mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
         df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
-    
-    df_proc['data_ult_renovacao_str'] = df_proc.apply(
-        lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
-                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
-        axis=1)
-
+    df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
     for col in ["data_admissao", "data_vencimento"]:
         df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
-
-    df_proc = df_proc.rename(columns={
-        'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
-        'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
-        'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
-    })
-    
+    df_proc = df_proc.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?', 'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'})
     return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
@@ -312,7 +271,6 @@ def show_message(message: Dict[str, Any]):
     st.toast(text, icon=icon_map.get(msg_type, 'ℹ️'))
 
 def page_dashboard():
-    # Código inalterado, pois as chamadas já estão corretas
     st.header("Dashboard de Contratos")
     proximos_dias_input = st.number_input(
         "'Venc. Próximo' (dias)", min_value=1, max_value=120, 
@@ -350,7 +308,6 @@ def page_dashboard():
         st.info("ℹ️ Utilize os filtros acima para pesquisar e exibir os dados dos estagiários.")
 
 def page_cadastro():
-    # Código inalterado, pois as chamadas já estão corretas
     st.header("Gerenciar Estagiários")
     if 'sub_menu_cad' not in st.session_state: st.session_state.sub_menu_cad = None
     if 'message' in st.session_state and st.session_state.message:
@@ -398,22 +355,23 @@ def page_cadastro():
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
+            # <<< ALTERAÇÃO AQUI: Adiciona `keys` a todos os campos do formulário de edição >>>
             with st.form("form_edit_cadastro"):
-                nome = st.text_input("Nome*", value=est_data_para_edicao["nome"]).strip().upper()
+                nome = st.text_input("Nome*", value=est_data_para_edicao["nome"], key="edit_nome").strip().upper()
                 uni_default = est_data_para_edicao.get("universidade")
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
-                universidade = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index)
+                universidade = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="edit_universidade")
                 if universidade == "Outra (cadastrar manualmente)":
-                    universidade = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "").strip().upper()
+                    universidade = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="edit_universidade_manual").strip().upper()
                 termo_meses = meses_por_universidade(universidade if universidade else "")
                 renov_disabled = (termo_meses >= 24)
                 c1, c2 = st.columns(2)
-                data_adm = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"])
+                data_adm = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"], key="edit_data_adm")
                 valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
                 if pd.isna(valor_data_renov): valor_data_renov = None
-                data_renov = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled)
+                data_renov = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled, key="edit_data_renov")
                 if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-                obs = st.text_area("Observações", value=est_data_para_edicao.get("obs", "")).strip().upper()
+                obs = st.text_area("Observações", value=est_data_para_edicao.get("obs", ""), key="edit_obs").strip().upper()
                 c_save, c_delete, c_cancel = st.columns([2, 2, 1])
                 if c_save.form_submit_button("💾 Salvar Alterações", use_container_width=True):
                     if not nome or not universidade or not data_adm:
@@ -473,7 +431,6 @@ def page_cadastro():
                         st.rerun()
 
 def page_base():
-    # Código inalterado
     st.header("Base de Dados de Estagiários")
     st.info("Abaixo está a lista completa de todos os estagiários cadastrados no sistema.")
     df_raw = get_estagiarios_df()
@@ -487,7 +444,6 @@ def page_base():
     st.download_button("📥 Exportar Base Completa", exportar_para_excel_bytes(get_estagiarios_df()), "base_completa_estagiarios.xlsx", key="download_base")
 
 def page_regras():
-    # Código inalterado
     st.header("Gerenciar Regras de Contrato")
     st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses). Universidades sem regra específica usarão o padrão de 6 meses.")
     if 'message_rule' in st.session_state and st.session_state.message_rule:
@@ -536,7 +492,6 @@ def page_regras():
                     st.form_submit_button("🗑️ Excluir Regra Selecionada", disabled=True, use_container_width=True)
 
 def page_import_export():
-    # Código inalterado
     st.header("Importar e Exportar Dados")
     c1, c2 = st.columns(2)
     with c1:
@@ -578,7 +533,6 @@ def page_import_export():
                 st.warning("Por favor, selecione um arquivo para importar.")
 
 def page_admin():
-    # Código inalterado
     st.header("🔑 Área Administrativa")
     if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
     admin_password = get_config("admin_password")
