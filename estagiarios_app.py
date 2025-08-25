@@ -236,9 +236,6 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
     df_proc = df_proc.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?', 'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'})
     return df_proc
 
-# O restante do código não precisa de alterações
-# ... (demais funções de página e main) ...
-
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
     query = "SELECT timestamp, action, details FROM logs ORDER BY id DESC LIMIT 50"
     params = {}
@@ -362,64 +359,45 @@ def page_cadastro():
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
 
-            # Flag para inicializar o estado do formulário apenas uma vez
-            if 'current_edit_id' not in st.session_state or st.session_state.current_edit_id != st.session_state.id_para_editar:
-                st.session_state.edit_nome = est_data_para_edicao["nome"]
-                st.session_state.edit_universidade = est_data_para_edicao.get("universidade")
-                st.session_state.edit_data_adm = est_data_para_edicao["data_admissao"].date()
-                st.session_state.edit_data_renov = None if pd.isna(est_data_para_edicao["data_ult_renovacao"]) else est_data_para_edicao["data_ult_renovacao"].date()
-                st.session_state.edit_obs = est_data_para_edicao.get("obs", "")
-                st.session_state.current_edit_id = st.session_state.id_para_editar
-
-            # Renderiza os widgets usando o session_state
-            st.text_input("Nome*", key="edit_nome")
-            uni_default = st.session_state.edit_universidade
+            # Renderiza os widgets com valores default do banco de dados e uma chave única
+            nome_edit = st.text_input("Nome*", value=est_data_para_edicao["nome"], key="edit_nome").strip().upper()
+            uni_default = est_data_para_edicao.get("universidade")
             uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
-            universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="edit_universidade")
+            universidade_edit = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="edit_universidade")
             
-            universidade_final = universidade_selecionada
-            if universidade_selecionada == "Outra (cadastrar manualmente)":
-                universidade_final = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="edit_universidade_manual").strip().upper()
+            if universidade_edit == "Outra (cadastrar manualmente)":
+                universidade_edit = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="edit_universidade_manual").strip().upper()
             
-            termo_meses = meses_por_universidade(universidade_final if universidade_final else "")
+            termo_meses = meses_por_universidade(universidade_edit if universidade_edit else "")
             renov_disabled = (termo_meses >= 24)
             c1, c2 = st.columns(2)
-            st.date_input("Data de Admissão*", key="edit_data_adm")
-            st.date_input("Data da Última Renovação", disabled=renov_disabled, key="edit_data_renov")
+            data_adm_edit = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"], key="edit_data_adm")
+            valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
+            if pd.isna(valor_data_renov): valor_data_renov = None
+            data_renov_edit = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled, key="edit_data_renov")
             if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-            st.text_area("Observações", key="edit_obs")
+            obs_edit = st.text_area("Observações", value=est_data_para_edicao.get("obs", ""), key="edit_obs").strip().upper()
             
             c_save, c_delete, c_cancel = st.columns([2, 2, 1])
 
             if c_save.button("💾 Salvar Alterações", use_container_width=True):
-                # Lê os valores mais recentes diretamente do session_state
-                nome_edit = st.session_state.edit_nome.strip().upper()
-                uni_edit = st.session_state.edit_universidade if st.session_state.edit_universidade != "Outra (cadastrar manualmente)" else st.session_state.edit_universidade_manual.strip().upper()
-                data_adm_edit = st.session_state.edit_data_adm
-                data_renov_edit = st.session_state.edit_data_renov
-                obs_edit = st.session_state.edit_obs.strip().upper()
-
-                if not nome_edit or not uni_edit or not data_adm_edit:
+                if not nome_edit or not universidade_edit or not data_adm_edit:
                     st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     st.rerun()
                 else:
                     data_venc = calcular_vencimento_final(data_adm_edit)
-                    update_estagiario(st.session_state.id_para_editar, nome_edit, uni_edit, data_adm_edit, data_renov_edit if not renov_disabled else None, obs_edit, data_venc)
+                    update_estagiario(st.session_state.id_para_editar, nome_edit, universidade_edit, data_adm_edit, data_renov_edit if not renov_disabled else None, obs_edit, data_venc)
                     st.session_state.message = {'text': f"Dados de {nome_edit} atualizados!", 'type': 'success'}
-                    
-                    # Limpa o estado
-                    st.session_state.sub_menu_cad = None
                     st.session_state.id_para_editar = None
-                    st.session_state.current_edit_id = None
+                    st.session_state.sub_menu_cad = None
                     st.rerun()
 
             if c_delete.button("🗑️ Excluir Estagiário", use_container_width=True):
-                st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': st.session_state.edit_nome}
+                st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': nome_edit}
                 st.rerun()
 
             if c_cancel.button("Cancelar Edição", use_container_width=True):
                 st.session_state.id_para_editar = None
-                st.session_state.current_edit_id = None
                 st.rerun()
             
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
@@ -431,7 +409,6 @@ def page_cadastro():
                     st.session_state.message = {'text': 'Estagiário excluído com sucesso!', 'type': 'success'}
                     st.session_state.confirm_delete_id = None
                     st.session_state.id_para_editar = None
-                    st.session_state.current_edit_id = None
                     st.session_state.sub_menu_cad = None
                     st.rerun()
                 if c2_del.button("NÃO, CANCELAR", key="cancel_del_btn"):
