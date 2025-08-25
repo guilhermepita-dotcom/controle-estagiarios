@@ -422,9 +422,8 @@ def page_cadastro():
             df_results.reset_index(drop=True, inplace=True)
 
             if not df_results.empty:
-                # <<< ALTERAÇÃO AQUI: Usa st.data_editor para seleção, removendo o st.selectbox >>>
                 st.info("Clique na linha da tabela para selecionar o estagiário que deseja editar.")
-                edited_df = st.data_editor(
+                st.data_editor(
                     df_results[['id', 'nome', 'universidade']], 
                     use_container_width=True, 
                     hide_index=True,
@@ -432,8 +431,10 @@ def page_cadastro():
                     disabled=['id', 'nome', 'universidade']
                 )
 
-                # Verifica se uma linha foi selecionada
-                if 'editor_selecao' in st.session_state and st.session_state.editor_selecao["selection"]["rows"]:
+                # <<< ALTERAÇÃO AQUI: Verificação robusta da chave 'selection' >>>
+                if ('editor_selecao' in st.session_state and 
+                    'selection' in st.session_state.editor_selecao and 
+                    st.session_state.editor_selecao['selection']['rows']):
                     selected_row_index = st.session_state.editor_selecao["selection"]["rows"][0]
                     selected_id = df_results.iloc[selected_row_index]['id']
                     est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == selected_id].iloc[0]
