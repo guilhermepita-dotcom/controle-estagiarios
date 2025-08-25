@@ -14,7 +14,11 @@ import pytz
 # ==========================
 # Configurações e Constantes
 # ==========================
-DB_FILE = "estagiarios.db" 
+
+# ***** CORREÇÃO DEFINITIVA APLICADA AQUI *****
+# Usando o caminho absoluto para o arquivo do banco de dados para garantir que o programa sempre encontre o arquivo certo.
+DB_FILE = "H:/GUILHERME PITA/6.EstagiariosApp/estagiarios.db"
+
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
@@ -403,9 +407,8 @@ def page_cadastro():
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
                 st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="universidade_select_edit")
                 
-                # Renderiza o campo de texto manual condicionalmente
                 universidade_manual_default = uni_default if uni_default not in universidades_padrao else ""
-                if st.session_state.get("universidade_select_edit") == "Outra (cadastrar manualmente)":
+                if 'universidade_select_edit' in st.session_state and st.session_state.universidade_select_edit == "Outra (cadastrar manualmente)":
                     st.text_input("Digite o nome da Universidade*", value=universidade_manual_default, key="universidade_manual_edit")
                 
                 termo_meses = meses_por_universidade(st.session_state.get("universidade_select_edit", ""))
@@ -675,4 +678,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
