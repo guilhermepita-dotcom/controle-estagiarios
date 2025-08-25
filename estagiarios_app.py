@@ -2,6 +2,7 @@ import os
 from datetime import date, datetime
 from typing import Optional, Dict, Any
 import io
+import unicodedata  # Adicionado para a busca inteligente
 
 import pandas as pd
 import sqlite3
@@ -153,6 +154,12 @@ def set_config(key: str, value: str):
 # ==========================
 # Funções de Lógica e CRUD
 # ==========================
+def normalize_text(text: str) -> str:
+    """Converte string para minúsculas e remove acentos."""
+    if not isinstance(text, str):
+        return ""
+    return "".join(c for c in unicodedata.normalize('NFD', text.lower()) if unicodedata.category(c) != 'Mn')
+
 def log_action(action: str, details: str = ""):
     conn = get_db_connection()
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
@@ -408,6 +415,7 @@ def page_cadastro():
             st.session_state.sub_menu_cad = None
             st.rerun()
 
+    # <<< ALTERAÇÃO AQUI: Nova lógica de busca e edição automática >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
         if df_estagiarios.empty:
@@ -418,11 +426,24 @@ def page_cadastro():
         
         est_data_para_edicao = None
         if search_term.strip():
-            df_results = df_estagiarios[df_estagiarios["nome"].str.contains(search_term.strip(), case=False, na=False)].copy()
+            # Realiza a busca normalizada (sem acento e case-insensitive)
+            normalized_search = normalize_text(search_term.strip())
+            df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
+            df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalized_search, na=False)].copy()
             df_results.reset_index(drop=True, inplace=True)
 
-            if not df_results.empty:
-                st.info("Clique na linha da tabela para selecionar o estagiário que deseja editar.")
+            # Caso 1: Nenhum resultado
+            if df_results.empty:
+                st.warning("Nenhum estagiário encontrado com esse nome.")
+            
+            # Caso 2: Exatamente um resultado, abre a edição
+            elif len(df_results) == 1:
+                st.success(f"Estagiário encontrado: {df_results.iloc[0]['nome']}")
+                est_data_para_edicao = df_results.iloc[0]
+
+            # Caso 3: Múltiplos resultados, pede para o usuário selecionar
+            else:
+                st.info(f"{len(df_results)} estagiários encontrados. Por favor, selecione um da tabela abaixo para editar.")
                 st.data_editor(
                     df_results[['id', 'nome', 'universidade']], 
                     use_container_width=True, 
@@ -431,17 +452,14 @@ def page_cadastro():
                     disabled=['id', 'nome', 'universidade']
                 )
 
-                # <<< ALTERAÇÃO AQUI: Verificação robusta da chave 'selection' >>>
                 if ('editor_selecao' in st.session_state and 
                     'selection' in st.session_state.editor_selecao and 
                     st.session_state.editor_selecao['selection']['rows']):
                     selected_row_index = st.session_state.editor_selecao["selection"]["rows"][0]
                     selected_id = df_results.iloc[selected_row_index]['id']
                     est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == selected_id].iloc[0]
-
-            else:
-                st.warning("Nenhum estagiário encontrado com esse nome.")
         
+        # Se um estagiário foi selecionado (ou encontrado), mostra o formulário de edição
         if est_data_para_edicao is not None:
             st.divider()
             
@@ -498,6 +516,7 @@ def page_cadastro():
                 if c2.button("NÃO, CANCELAR", key="cancel_del_btn"):
                     st.session_state.confirm_delete_id = None
                     st.rerun()
+
 
 def page_regras():
     st.header("Gerenciar Regras de Contrato")
