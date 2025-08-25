@@ -147,6 +147,7 @@ def set_config(key: str, value: str):
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
 
 # ==========================
 # Funções de Lógica e CRUD
@@ -160,6 +161,7 @@ def log_action(action: str, details: str = ""):
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
 
 def list_regras() -> pd.DataFrame:
     return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
@@ -168,12 +170,14 @@ def add_regra(keyword: str, meses: int):
     conn = get_db_connection()
     conn.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
     log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
 
 def delete_regra(regra_id: int, keyword: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
     log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
 
 def get_estagiarios_df() -> pd.DataFrame:
@@ -195,6 +199,7 @@ def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: 
     conn.execute("INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)",
                  (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
     log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
@@ -202,12 +207,14 @@ def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date,
     conn.execute("UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?",
                  (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
     log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
 def delete_estagiario(est_id: int, nome: str):
     conn = get_db_connection()
     conn.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     conn.commit()
+    st.cache_resource.clear() # <<< CORREÇÃO AQUI
     log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
 def meses_por_universidade(universidade: str) -> int:
@@ -238,17 +245,11 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
 
-# <<< ALTERAÇÃO AQUI: Função de Status refatorada para ser explícita e corrigir o bug >>>
 def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
-    """Função auxiliar para calcular o status de uma única linha."""
     if row['proxima_renovacao'] == "Renovação Pendente": return "Vencido"
-    
     data_alvo = pd.to_datetime(row['proxima_renovacao'], format='%d.%m.%Y', errors='coerce')
-    
     if pd.isna(data_alvo): data_alvo = row['data_vencimento']
-        
     if pd.isna(data_alvo): return "SEM DATA"
-        
     delta = (data_alvo.date() - date.today()).days
     if delta < 0: return "Vencido"
     if delta <= proximos_dias: return "Venc.Proximo"
@@ -257,12 +258,8 @@ def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
 def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataFrame:
     if df.empty: return df
     df_proc = df.copy()
-    
     df_proc['proxima_renovacao'] = df_proc.apply(calcular_proxima_renovacao, axis=1)
-    
-    # Passa o argumento `proximos_dias` para a função apply
     df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
-    
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
 
     regras_df = list_regras()
@@ -289,6 +286,7 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
     return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
+    # Código inalterado
     query = "SELECT timestamp, action, details FROM logs"
     params = {}
     if start_date and end_date:
@@ -298,6 +296,7 @@ def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = N
     return pd.read_sql_query(query, get_db_connection(), params=params)
 
 def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
+    # Código inalterado
     query = "SELECT timestamp, action, details FROM logs"
     params = {}
     if start_date and end_date:
@@ -308,6 +307,7 @@ def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[da
     return df.to_string(index=False).encode('utf-8')
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
+    # Código inalterado
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export = df.copy()
@@ -318,6 +318,7 @@ def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
     return output.getvalue()
 
 def show_message(message: Dict[str, Any]):
+    # Código inalterado
     msg_type = message.get('type', 'info')
     text = message.get('text', 'Ação concluída.')
     icon_map = {'success': '✅', 'warning': '⚠️', 'error': '❌', 'info': 'ℹ️'}
@@ -326,8 +327,8 @@ def show_message(message: Dict[str, Any]):
 # ===============================================
 # SEÇÕES DA APLICAÇÃO (PÁGINAS)
 # ===============================================
-
 def page_dashboard():
+    # Código inalterado
     st.header("Dashboard de Contratos")
     proximos_dias_input = st.number_input(
         "'Venc. Próximo' (dias)", min_value=1, max_value=120, 
@@ -336,30 +337,24 @@ def page_dashboard():
     )
     if str(proximos_dias_input) != get_config("proximos_dias"):
         set_config("proximos_dias", str(proximos_dias_input))
-
     df_raw = get_estagiarios_df()
     if df_raw.empty:
         st.info("Nenhum estagiário cadastrado ainda.")
         return
-
     df_display = processar_df_para_exibicao(df_raw, proximos_dias_input)
-
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("👥 Total de Estagiários", len(df_display))
     c2.metric("✅ Contratos OK", (df_display["Status"] == "OK").sum())
     c3.metric("⚠️ Vencimentos Próximos", (df_display["Status"] == "Venc.Proximo").sum())
     c4.metric("⛔ Contratos Vencidos", (df_display["Status"] == "Vencido").sum())
     st.divider()
-
     filtros_c1, filtros_c2 = st.columns(2)
     filtro_status = filtros_c1.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"])
     filtro_nome = filtros_c2.text_input("🔎 Buscar por Nome do Estagiário")
-
     if filtro_status or filtro_nome.strip():
         df_view = df_display.copy()
         if filtro_status: df_view = df_view[df_view["Status"].isin(filtro_status)]
         if filtro_nome.strip(): df_view = df_view[df_view["Nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
-
         if df_view.empty:
             st.warning("Nenhum registro encontrado para os filtros selecionados.")
         else:
@@ -500,10 +495,8 @@ def page_base():
     if df_raw.empty:
         st.warning("Nenhum estagiário cadastrado para exibir.")
         return
-    
     proximos_dias_config = int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS))
     df_display = processar_df_para_exibicao(df_raw, proximos_dias_config)
-
     colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
     st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
     st.download_button("📥 Exportar Base Completa", exportar_para_excel_bytes(get_estagiarios_df()), "base_completa_estagiarios.xlsx", key="download_base")
