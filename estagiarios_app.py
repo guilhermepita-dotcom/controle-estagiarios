@@ -5,11 +5,15 @@ import io
 import unicodedata
 
 import pandas as pd
-import libsql_client # Nova biblioteca para o Turso
+import libsql_client
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 from streamlit_option_menu import option_menu
 import pytz
+
+# <<< ALTERAÇÃO AQUI: Importa e ativa o tradutor asyncio >>>
+import nest_asyncio
+nest_asyncio.apply()
 
 # ==========================
 # Configurações e Constantes
@@ -104,8 +108,8 @@ def get_db_client():
         return None
     url = st.secrets["DB_URL"]
     auth_token = st.secrets["DB_AUTH_TOKEN"]
-    # <<< ALTERAÇÃO AQUI: Adiciona o parâmetro in_thread=True para compatibilidade >>>
-    return libsql_client.create_client(url=url, auth_token=auth_token, in_thread=True)
+    # <<< ALTERAÇÃO AQUI: Remove o parâmetro in_thread=True, pois o nest_asyncio resolve o problema >>>
+    return libsql_client.create_client(url=url, auth_token=auth_token)
 
 def init_db():
     client = get_db_client()
@@ -122,8 +126,7 @@ def init_db():
         if not get_config('proximos_dias'): set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
         if not get_config('admin_password'): set_config('admin_password', '123456')
 
-# ... O restante do código permanece o mesmo, pois as chamadas para as funções de dados não mudaram ...
-# (As funções de CRUD agora usam o `client` obtido de `get_db_client` que já tem a correção)
+# ... O restante do código permanece o mesmo ...
 def get_config(key: str, default: Optional[str] = None) -> str:
     client = get_db_client()
     if not client: return default if default is not None else ""
@@ -246,7 +249,6 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
         df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
     else:
         df_proc['data_ult_renovacao_str'] = df_proc['data_ult_renovacao'].dt.strftime('%d.%m.%Y').replace('NaT', '')
-
     for col in ["data_admissao", "data_vencimento"]:
         df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
     df_proc = df_proc.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?', 'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'})
@@ -337,7 +339,6 @@ def page_cadastro():
         st.session_state.sub_menu_cad = "Editar"; st.session_state.id_para_editar = None; st.rerun()
     st.divider()
     if st.session_state.sub_menu_cad == "Novo":
-        # Código inalterado, pois já estava funcionando bem
         st.subheader("Cadastrar Novo Estagiário")
         nome = st.text_input("Nome*", key="novo_nome").strip().upper()
         universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...", key="novo_uni")
@@ -372,7 +373,6 @@ def page_cadastro():
                 st.session_state.id_para_editar = None; return
             est_data_para_edicao = est_data_para_edicao_list[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
-            # Lógica simplificada sem st.form
             nome_edit = st.text_input("Nome*", value=est_data_para_edicao["nome"], key=f"edit_nome_{st.session_state.id_para_editar}")
             uni_default = est_data_para_edicao.get("universidade")
             uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
@@ -574,7 +574,9 @@ def main():
     load_custom_css()
     if not check_secrets():
         st.error("As credenciais do banco de dados (DB_URL, DB_AUTH_TOKEN) não foram configuradas nos Secrets do Streamlit.")
+        st.info("Por favor, siga as instruções para adicionar os Secrets e reinicie o aplicativo.")
         st.stop()
+    
     init_db()
     c1, c2 = st.columns([1, 4], vertical_alignment="center")
     if os.path.exists(LOGO_FILE): c1.image(LOGO_FILE, width=150)
@@ -606,3 +608,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+        
