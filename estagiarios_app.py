@@ -5,7 +5,7 @@ import io
 import unicodedata
 
 import pandas as pd
-import libsql_client # Nova biblioteca para o Turso
+import sqlite3
 import streamlit as st
 from dateutil.relativedelta import relativedelta
 from streamlit_option_menu import option_menu
@@ -14,6 +14,7 @@ import pytz
 # ==========================
 # Configurações e Constantes
 # ==========================
+DB_FILE = "estagiarios.db"
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
@@ -91,105 +92,93 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 # ==========================
-# Conexão com o Banco de Dados Turso
+# Banco de Dados (Arquitetura Robusta)
 # ==========================
-def check_secrets():
-    """Verifica se os secrets do banco de dados estão configurados."""
-    return "DB_URL" in st.secrets and "DB_AUTH_TOKEN" in st.secrets
-
 @st.cache_resource
-def get_db_client():
-    """Cria e armazena em cache o cliente do banco de dados Turso."""
-    if not check_secrets():
-        return None
-    url = st.secrets["DB_URL"]
-    auth_token = st.secrets["DB_AUTH_TOKEN"]
-    # <<< ALTERAÇÃO AQUI: Adiciona o parâmetro in_thread=True para compatibilidade >>>
-    return libsql_client.create_client(url=url, auth_token=auth_token, in_thread=True)
+def get_read_connection():
+    try:
+        conn = sqlite3.connect(f'file:{DB_FILE}?mode=ro', check_same_thread=False, uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except sqlite3.OperationalError:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+def execute_write_query(query: str, params: tuple = ()):
+    try:
+        with sqlite3.connect(DB_FILE, timeout=10) as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
+            conn.execute(query, params)
+            conn.commit()
+        st.cache_resource.clear()
+    except sqlite3.Error as e:
+        st.error(f"Erro ao escrever no banco de dados: {e}")
+        st.stop()
 
 def init_db():
-    client = get_db_client()
-    if client:
-        client.batch([
-            "CREATE TABLE IF NOT EXISTS estagiarios (id INTEGER PRIMARY KEY, nome TEXT, universidade TEXT, data_admissao TEXT, data_ult_renovacao TEXT, obs TEXT, data_vencimento TEXT)",
-            "CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE, meses INTEGER)",
-            "CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)",
-            "CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY, timestamp TEXT, action TEXT, details TEXT)"
-        ])
-        if get_config('regras_iniciadas') != 'true':
-            for kw, meses in DEFAULT_REGRAS: add_regra(kw.upper(), meses)
-            set_config('regras_iniciadas', 'true')
-        if not get_config('proximos_dias'): set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
-        if not get_config('admin_password'): set_config('admin_password', '123456')
+    execute_write_query("CREATE TABLE IF NOT EXISTS estagiarios (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL, data_admissao TEXT NOT NULL, data_ult_renovacao TEXT, obs TEXT, data_vencimento TEXT)")
+    execute_write_query("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
+    execute_write_query("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    execute_write_query("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, action TEXT NOT NULL, details TEXT)")
+    if not get_config('regras_iniciadas'):
+        for kw, meses in DEFAULT_REGRAS: add_regra(kw.upper(), meses)
+        set_config('regras_iniciadas', 'true')
+    if not get_config('proximos_dias'): set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
+    if not get_config('admin_password'): set_config('admin_password', '123456')
 
-# ... O restante do código permanece o mesmo, pois as chamadas para as funções de dados não mudaram ...
-# (As funções de CRUD agora usam o `client` obtido de `get_db_client` que já tem a correção)
 def get_config(key: str, default: Optional[str] = None) -> str:
-    client = get_db_client()
-    if not client: return default if default is not None else ""
-    rs = client.execute("SELECT value FROM config WHERE key = ?", (key,))
-    return rs.rows[0][0] if len(rs.rows) > 0 else (default if default is not None else "")
+    row = get_read_connection().execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+    return row['value'] if row else (default if default is not None else "")
 
 def set_config(key: str, value: str):
-    client = get_db_client()
-    if client: client.execute("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
+    execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
 
+# ==========================
+# Funções de Lógica e CRUD
+# ==========================
 def log_action(action: str, details: str = ""):
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
-    client = get_db_client()
-    if client: client.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
+    execute_write_query("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
 
 def list_regras() -> pd.DataFrame:
-    client = get_db_client()
-    if not client: return pd.DataFrame()
-    rs = client.execute("SELECT id, keyword, meses FROM regras ORDER BY keyword")
-    return pd.DataFrame(rs.rows, columns=rs.columns)
+    return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_read_connection())
 
 def add_regra(keyword: str, meses: int):
-    client = get_db_client()
-    if client:
-        client.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
-        log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
+    execute_write_query("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
+    log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
 
 def delete_regra(regra_id: int, keyword: str):
-    client = get_db_client()
-    if client:
-        client.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
-        log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
+    execute_write_query("DELETE FROM regras WHERE id=?", (int(regra_id),))
+    log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
 
 def get_estagiarios_df() -> pd.DataFrame:
-    client = get_db_client()
-    if not client: return pd.DataFrame()
-    rs = client.execute("SELECT * FROM estagiarios")
-    if not rs.rows: return pd.DataFrame()
-    
-    df = pd.DataFrame(rs.rows, columns=rs.columns)
+    try:
+        df = pd.read_sql_query("SELECT * FROM estagiarios", get_read_connection(), index_col="id")
+    except (pd.io.sql.DatabaseError, ValueError):
+        return pd.DataFrame()
+    if df.empty: return df
     for col in ['data_admissao', 'data_ult_renovacao', 'data_vencimento']:
         df[col] = pd.to_datetime(df[col], errors='coerce')
     df = df.sort_values(by='data_vencimento', ascending=True)
+    df.reset_index(inplace=True)
     return df
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    client = get_db_client()
-    if client:
-        query = "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)"
-        params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
-        client.execute(query, params)
-        log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
+    query = "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)"
+    params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
+    execute_write_query(query, params)
+    log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    client = get_db_client()
-    if client:
-        query = "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?"
-        params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
-        client.execute(query, params)
-        log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
+    query = "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?"
+    params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
+    execute_write_query(query, params)
+    log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
 def delete_estagiario(est_id: int, nome: str):
-    client = get_db_client()
-    if client:
-        client.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
-        log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
+    execute_write_query("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
+    log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
 def normalize_text(text: str) -> str:
     if not isinstance(text, str): return ""
@@ -198,7 +187,6 @@ def normalize_text(text: str) -> str:
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
     df_regras = list_regras()
-    if df_regras.empty: return DEFAULT_DURATION_OTHERS
     regras_dict = {row["keyword"]: int(row["meses"]) for _, row in df_regras.iterrows()}
     return regras_dict.get(universidade.upper(), DEFAULT_DURATION_OTHERS)
 
@@ -237,42 +225,36 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
     df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
     regras_df = list_regras()
-    if not regras_df.empty:
-        regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
-        df_proc['data_ult_renovacao_str'] = ''
-        if regras_24m_keywords:
-            mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
-            df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
-        df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
-    else:
-        df_proc['data_ult_renovacao_str'] = df_proc['data_ult_renovacao'].dt.strftime('%d.%m.%Y').replace('NaT', '')
-
+    regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
+    df_proc['data_ult_renovacao_str'] = ''
+    if regras_24m_keywords:
+        mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
+        df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
+    df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
     for col in ["data_admissao", "data_vencimento"]:
         df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
     df_proc = df_proc.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?', 'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'})
     return df_proc
 
+# O restante do código não precisa de alterações
+# ... (demais funções de página e main) ...
+
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
-    client = get_db_client()
-    if not client: return pd.DataFrame()
     query = "SELECT timestamp, action, details FROM logs ORDER BY id DESC LIMIT 50"
-    params = ()
+    params = {}
     if start_date and end_date:
         query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id DESC LIMIT 50"
         params = (str(start_date), str(end_date))
-    rs = client.execute(query, params)
-    return pd.DataFrame(rs.rows, columns=rs.columns)
+    df = pd.read_sql_query(query, get_read_connection(), params=params)
+    return df
 
 def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
-    client = get_db_client()
-    if not client: return b""
     query = "SELECT timestamp, action, details FROM logs ORDER BY id ASC"
-    params = ()
+    params = {}
     if start_date and end_date:
         query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id ASC"
         params = (str(start_date), str(end_date))
-    rs = client.execute(query, params)
-    df = pd.DataFrame(rs.rows, columns=rs.columns)
+    df = pd.read_sql_query(query, get_read_connection(), params=params)
     return df.to_string(index=False).encode('utf-8')
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
@@ -293,7 +275,11 @@ def show_message(message: Dict[str, Any]):
 
 def page_dashboard():
     st.header("Dashboard de Contratos")
-    proximos_dias_input = st.number_input("'Venc. Próximo' (dias)", min_value=1, max_value=120, value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1, help="Define o número de dias para um contrato ser considerado 'Próximo do Vencimento'.")
+    proximos_dias_input = st.number_input(
+        "'Venc. Próximo' (dias)", min_value=1, max_value=120, 
+        value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1,
+        help="Define o número de dias para um contrato ser considerado 'Próximo do Vencimento'."
+    )
     if str(proximos_dias_input) != get_config("proximos_dias"):
         set_config("proximos_dias", str(proximos_dias_input))
     df_raw = get_estagiarios_df()
@@ -332,12 +318,15 @@ def page_cadastro():
         st.session_state.message = None
     cols = st.columns(2)
     if cols[0].button("➕ Novo Estagiário", use_container_width=True, key="btn_novo_estagiario"): 
-        st.session_state.sub_menu_cad = "Novo"; st.session_state.id_para_editar = None; st.rerun()
+        st.session_state.sub_menu_cad = "Novo"
+        st.session_state.id_para_editar = None
+        st.rerun()
     if cols[1].button("🔎 Consultar / Editar", use_container_width=True, key="btn_consultar_estagiario"): 
-        st.session_state.sub_menu_cad = "Editar"; st.session_state.id_para_editar = None; st.rerun()
+        st.session_state.sub_menu_cad = "Editar"
+        st.session_state.id_para_editar = None
+        st.rerun()
     st.divider()
     if st.session_state.sub_menu_cad == "Novo":
-        # Código inalterado, pois já estava funcionando bem
         st.subheader("Cadastrar Novo Estagiário")
         nome = st.text_input("Nome*", key="novo_nome").strip().upper()
         universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...", key="novo_uni")
@@ -362,47 +351,77 @@ def page_cadastro():
                 st.session_state.sub_menu_cad = None
             st.rerun()
         if c_cancel.button("Cancelar", use_container_width=True, key="btn_cancelar_novo"):
-            st.session_state.sub_menu_cad = None; st.rerun()
+            st.session_state.sub_menu_cad = None
+            st.rerun()
+
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
+
+        # <<< ALTERAÇÃO AQUI: Lógica de edição totalmente refeita sem st.form >>>
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
-            est_data_para_edicao_list = [row for row in df_estagiarios.to_dict('records') if row['id'] == st.session_state.id_para_editar]
-            if not est_data_para_edicao_list:
-                st.error("Estagiário não encontrado. Selecione outro.")
-                st.session_state.id_para_editar = None; return
-            est_data_para_edicao = est_data_para_edicao_list[0]
+            est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
-            # Lógica simplificada sem st.form
-            nome_edit = st.text_input("Nome*", value=est_data_para_edicao["nome"], key=f"edit_nome_{st.session_state.id_para_editar}")
-            uni_default = est_data_para_edicao.get("universidade")
+
+            # Flag para inicializar o estado do formulário apenas uma vez
+            if 'current_edit_id' not in st.session_state or st.session_state.current_edit_id != st.session_state.id_para_editar:
+                st.session_state.edit_nome = est_data_para_edicao["nome"]
+                st.session_state.edit_universidade = est_data_para_edicao.get("universidade")
+                st.session_state.edit_data_adm = est_data_para_edicao["data_admissao"].date()
+                st.session_state.edit_data_renov = None if pd.isna(est_data_para_edicao["data_ult_renovacao"]) else est_data_para_edicao["data_ult_renovacao"].date()
+                st.session_state.edit_obs = est_data_para_edicao.get("obs", "")
+                st.session_state.current_edit_id = st.session_state.id_para_editar
+
+            # Renderiza os widgets usando o session_state
+            st.text_input("Nome*", key="edit_nome")
+            uni_default = st.session_state.edit_universidade
             uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
-            universidade_edit = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key=f"edit_universidade_{st.session_state.id_para_editar}")
-            if universidade_edit == "Outra (cadastrar manualmente)":
-                universidade_edit = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key=f"edit_universidade_manual_{st.session_state.id_para_editar}")
-            termo_meses = meses_por_universidade(universidade_edit if universidade_edit else "")
+            universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="edit_universidade")
+            
+            universidade_final = universidade_selecionada
+            if universidade_selecionada == "Outra (cadastrar manualmente)":
+                universidade_final = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="edit_universidade_manual").strip().upper()
+            
+            termo_meses = meses_por_universidade(universidade_final if universidade_final else "")
             renov_disabled = (termo_meses >= 24)
             c1, c2 = st.columns(2)
-            data_adm_edit = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"], key=f"edit_data_adm_{st.session_state.id_para_editar}")
-            valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
-            if pd.isna(valor_data_renov): valor_data_renov = None
-            data_renov_edit = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled, key=f"edit_data_renov_{st.session_state.id_para_editar}")
+            st.date_input("Data de Admissão*", key="edit_data_adm")
+            st.date_input("Data da Última Renovação", disabled=renov_disabled, key="edit_data_renov")
             if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-            obs_edit = st.text_area("Observações", value=est_data_para_edicao.get("obs", ""), key=f"edit_obs_{st.session_state.id_para_editar}")
+            st.text_area("Observações", key="edit_obs")
+            
             c_save, c_delete, c_cancel = st.columns([2, 2, 1])
+
             if c_save.button("💾 Salvar Alterações", use_container_width=True):
-                nome_final = nome_edit.strip().upper()
-                universidade_final = universidade_edit.strip().upper()
-                if not nome_final or not universidade_final or not data_adm_edit:
-                    st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}; st.rerun()
+                # Lê os valores mais recentes diretamente do session_state
+                nome_edit = st.session_state.edit_nome.strip().upper()
+                uni_edit = st.session_state.edit_universidade if st.session_state.edit_universidade != "Outra (cadastrar manualmente)" else st.session_state.edit_universidade_manual.strip().upper()
+                data_adm_edit = st.session_state.edit_data_adm
+                data_renov_edit = st.session_state.edit_data_renov
+                obs_edit = st.session_state.edit_obs.strip().upper()
+
+                if not nome_edit or not uni_edit or not data_adm_edit:
+                    st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
+                    st.rerun()
                 else:
                     data_venc = calcular_vencimento_final(data_adm_edit)
-                    update_estagiario(st.session_state.id_para_editar, nome_final, universidade_final, data_adm_edit, data_renov_edit if not renov_disabled else None, obs_edit.strip().upper(), data_venc)
-                    st.session_state.message = {'text': f"Dados de {nome_final} atualizados!", 'type': 'success'}
-                    st.session_state.id_para_editar = None; st.session_state.sub_menu_cad = None; st.rerun()
+                    update_estagiario(st.session_state.id_para_editar, nome_edit, uni_edit, data_adm_edit, data_renov_edit if not renov_disabled else None, obs_edit, data_venc)
+                    st.session_state.message = {'text': f"Dados de {nome_edit} atualizados!", 'type': 'success'}
+                    
+                    # Limpa o estado
+                    st.session_state.sub_menu_cad = None
+                    st.session_state.id_para_editar = None
+                    st.session_state.current_edit_id = None
+                    st.rerun()
+
             if c_delete.button("🗑️ Excluir Estagiário", use_container_width=True):
-                st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': nome_edit}; st.rerun()
+                st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': st.session_state.edit_nome}
+                st.rerun()
+
             if c_cancel.button("Cancelar Edição", use_container_width=True):
-                st.session_state.id_para_editar = None; st.rerun()
+                st.session_state.id_para_editar = None
+                st.session_state.current_edit_id = None
+                st.rerun()
+            
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
                 data_to_delete = st.session_state.confirm_delete_id
                 st.warning(f"Tem certeza que deseja excluir **{data_to_delete['nome']}**? Esta ação não pode ser desfeita.")
@@ -410,18 +429,26 @@ def page_cadastro():
                 if c1_del.button("SIM, EXCLUIR", key="confirm_del_btn"):
                     delete_estagiario(data_to_delete['id'], data_to_delete['nome'])
                     st.session_state.message = {'text': 'Estagiário excluído com sucesso!', 'type': 'success'}
-                    st.session_state.confirm_delete_id = None; st.session_state.id_para_editar = None; st.session_state.sub_menu_cad = None; st.rerun()
+                    st.session_state.confirm_delete_id = None
+                    st.session_state.id_para_editar = None
+                    st.session_state.current_edit_id = None
+                    st.session_state.sub_menu_cad = None
+                    st.rerun()
                 if c2_del.button("NÃO, CANCELAR", key="cancel_del_btn"):
-                    st.session_state.confirm_delete_id = None; st.rerun()
+                    st.session_state.confirm_delete_id = None
+                    st.rerun()
         else:
             if df_estagiarios.empty:
-                st.info("Nenhum estagiário para editar."); return
+                st.info("Nenhum estagiário para editar.")
+                return
             search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
             if search_term.strip():
+                normalized_search = normalize_text(search_term.strip())
                 df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
-                df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalize_text(search_term.strip()), na=False)].copy()
+                df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalized_search, na=False)].copy()
                 df_results.reset_index(drop=True, inplace=True)
-                if df_results.empty: st.warning("Nenhum estagiário encontrado com esse nome.")
+                if df_results.empty:
+                    st.warning("Nenhum estagiário encontrado com esse nome.")
                 elif len(df_results) == 1:
                     st.success(f"Estagiário encontrado: {df_results.iloc[0]['nome']}. Carregando formulário de edição...")
                     st.session_state.id_para_editar = df_results.iloc[0]['id']
@@ -434,7 +461,8 @@ def page_cadastro():
                     radio_options_map = {f"{row['nome']} (ID: {row['id']}, Admissão: {row['data_admissao_str']})": row['id'] for index, row in df_results.iterrows()}
                     selected_option = st.radio("Selecione o estagiário:", options=radio_options_map.keys(), key="radio_selecao_estagiario")
                     if st.button("Editar Selecionado", use_container_width=True):
-                        st.session_state.id_para_editar = radio_options_map[selected_option]; st.rerun()
+                        st.session_state.id_para_editar = radio_options_map[selected_option]
+                        st.rerun()
 
 def page_base():
     st.header("Base de Dados de Estagiários")
@@ -462,9 +490,11 @@ def page_regras():
         if c1.button("SIM, EXCLUIR REGRA"):
             delete_regra(rule['id'], rule['keyword'])
             st.session_state.message_rule = {'text': f"Regra para {rule['keyword']} excluída!", 'type': 'success'}
-            st.session_state.rule_to_delete = None; st.rerun()
+            st.session_state.rule_to_delete = None
+            st.rerun()
         if c2.button("NÃO, CANCELAR"):
-            st.session_state.rule_to_delete = None; st.rerun()
+            st.session_state.rule_to_delete = None
+            st.rerun()
     else:
         df_regras = list_regras()
         if df_regras.empty: st.info("Nenhuma regra personalizada cadastrada.")
@@ -480,7 +510,8 @@ def page_regras():
                 meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
                 if st.form_submit_button("Salvar Regra", use_container_width=True) and keyword_raw:
                     add_regra(keyword_raw, meses)
-                    st.session_state.message_rule = {'text': f"Regra para '{keyword_raw}' salva!", 'type': 'success'}; st.rerun()
+                    st.session_state.message_rule = {'text': f"Regra para '{keyword_raw}' salva!", 'type': 'success'}
+                    st.rerun()
         with c2:
             with st.form("form_delete_regra"):
                 st.subheader("Excluir Regra")
@@ -488,7 +519,8 @@ def page_regras():
                     opcoes = {f"{r['keyword']} ({r['meses']} meses)": {"id": r['id'], "keyword": r['keyword']} for _, r in df_regras.iterrows()}
                     regra_para_deletar_str = st.selectbox("Selecione a regra para excluir", options=opcoes.keys())
                     if st.form_submit_button("🗑️ Excluir Regra Selecionada", use_container_width=True):
-                        st.session_state.rule_to_delete = opcoes[regra_para_deletar_str]; st.rerun()
+                        st.session_state.rule_to_delete = opcoes[regra_para_deletar_str]
+                        st.rerun()
                 else:
                     st.selectbox("Selecione a regra para excluir", [], disabled=True)
                     st.form_submit_button("🗑️ Excluir Regra Selecionada", disabled=True, use_container_width=True)
@@ -543,7 +575,8 @@ def page_admin():
             senha = st.text_input("Senha", type="password", label_visibility="collapsed", placeholder="Senha de Administrador")
             if st.form_submit_button("Entrar", use_container_width=True):
                 if senha == admin_password:
-                    st.session_state.admin_logged_in = True; st.rerun()
+                    st.session_state.admin_logged_in = True
+                    st.rerun()
                 else:
                     st.error("Senha incorreta.")
         return
@@ -551,7 +584,9 @@ def page_admin():
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Backup do Banco de Dados")
-        st.warning("Backup não disponível ao usar banco de dados na nuvem.")
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE, "rb") as f: db_bytes = f.read()
+            st.download_button(label="📥 Baixar Backup (.db)", data=db_bytes, file_name="backup_estagiarios.db", use_container_width=True)
     with c2:
         st.subheader("Logs do Sistema")
         col_f1, col_f2 = st.columns(2)
@@ -572,9 +607,6 @@ def page_admin():
 # ==========================
 def main():
     load_custom_css()
-    if not check_secrets():
-        st.error("As credenciais do banco de dados (DB_URL, DB_AUTH_TOKEN) não foram configuradas nos Secrets do Streamlit.")
-        st.stop()
     init_db()
     c1, c2 = st.columns([1, 4], vertical_alignment="center")
     if os.path.exists(LOGO_FILE): c1.image(LOGO_FILE, width=150)
