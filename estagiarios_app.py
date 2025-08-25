@@ -14,7 +14,13 @@ import pytz
 # ==========================
 # Configurações e Constantes
 # ==========================
-DB_FILE = "H:\GUILHERME PITA\6.EstagiariosApp\estagiarios.db"
+
+# !!!!! ATENÇÃO: FAÇA O PASSO 1 AQUI !!!!!
+# Substitua pelo caminho absoluto do seu arquivo de banco de dados
+# Exemplo Windows: DB_FILE = "C:/Users/SeuNome/Documents/estagiarios.db"
+# Exemplo Mac/Linux: DB_FILE = "/home/seunome/documentos/estagiarios.db"
+DB_FILE = "estagiarios.db" 
+
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
@@ -98,15 +104,25 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
+# ===== FUNÇÃO MODIFICADA PARA DEPURAÇÃO =====
 def execute_write_query(query: str, params: tuple = ()):
     try:
+        st.info(f"DB WRITE: Tentando executar query: {query}") # MENSAGEM DE DEBUG
+        st.info(f"DB WRITE: Com os parâmetros: {params}") # MENSAGEM DE DEBUG
         with sqlite3.connect(DB_FILE, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
-    except sqlite3.Error as e:
-        st.error(f"Erro ao escrever no banco de dados: {e}")
+            st.info("DB WRITE: Commit realizado com sucesso.") # MENSAGEM DE SUCESSO DO COMMIT
+    except Exception as e:
+        # Captura QUALQUER erro e o exibe na tela
+        st.error(f"!!!!!!!! ERRO GRAVE AO ESCREVER NO BANCO DE DADOS !!!!!!!!")
+        st.error(f"Query: {query}")
+        st.error(f"Parâmetros: {params}")
+        st.error(f"Tipo do Erro: {type(e).__name__}")
+        st.error(f"Mensagem do Erro: {e}")
         st.stop()
+
 
 def init_db():
     execute_write_query("CREATE TABLE IF NOT EXISTS estagiarios (id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL, data_admissao TEXT NOT NULL, data_ult_renovacao TEXT, obs TEXT, data_vencimento TEXT)")
@@ -116,9 +132,6 @@ def init_db():
     
     conn = get_db_connection()
     try:
-        # As regras padrão (DEFAULT_REGRAS) não estavam definidas no código original, então a inicialização foi removida para evitar erro.
-        # Se você tiver regras padrão, pode adicioná-las aqui.
-        
         config_check = conn.execute("SELECT value FROM config WHERE key='proximos_dias'").fetchone()
         if not config_check:
             execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
@@ -140,9 +153,8 @@ def get_config(key: str, default: Optional[str] = None) -> str:
 def set_config(key: str, value: str):
     execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
 
-# ==========================
+# O restante do código permanece o mesmo...
 # Funções de Lógica e CRUD
-# ==========================
 def log_action(action: str, details: str = ""):
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     execute_write_query("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
@@ -336,7 +348,7 @@ def page_dashboard():
         else:
             colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
             st.dataframe(df_view[colunas_ordenadas], use_container_width=True, hide_index=True)
-            df_export_raw = get_estagiarios_df() # Pega dados frescos
+            df_export_raw = get_estagiarios_df()
             df_export_filtered = df_export_raw[df_export_raw['id'].isin(df_view['ID'])]
             st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_export_filtered), "estagiarios_filtrados.xlsx", key="download_dashboard")
     else:
@@ -395,8 +407,6 @@ def page_cadastro():
         df_estagiarios = get_estagiarios_df()
 
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
-            # Pega os dados mais recentes para popular o formulário
-            # Esta linha garante que após o rerun, os dados frescos do BD sejam usados
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
 
@@ -443,9 +453,6 @@ def page_cadastro():
                             data_venc
                         )
                         st.session_state.message = {'text': f"Dados de {nome_novo.strip().upper()} atualizados com sucesso!", 'type': 'success'}
-                        
-                        # A linha 'st.session_state.id_para_editar = None' foi REMOVIDA daqui.
-                        # Isso força o formulário a se redesenhar com os dados atualizados do banco.
                     
                     st.rerun()
 
@@ -455,7 +462,7 @@ def page_cadastro():
                 st.rerun()
 
             if c_cancel.button("Voltar para a Busca", use_container_width=True):
-                st.session_state.id_para_editar = None # O botão de cancelar agora limpa o ID
+                st.session_state.id_para_editar = None
                 st.rerun()
             
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
@@ -467,7 +474,7 @@ def page_cadastro():
                     st.session_state.message = {'text': 'Estagiário excluído com sucesso!', 'type': 'success'}
                     st.session_state.confirm_delete_id = None
                     st.session_state.id_para_editar = None
-                    st.session_state.sub_menu_cad = "Editar" # Volta para a tela de edição
+                    st.session_state.sub_menu_cad = "Editar"
                     st.rerun()
                 if c2_del.button("NÃO, CANCELAR", key="cancel_del_btn"):
                     st.session_state.confirm_delete_id = None
@@ -673,4 +680,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
