@@ -15,11 +15,8 @@ import pytz
 # Configurações e Constantes
 # ==========================
 
-# !!!!! ATENÇÃO: FAÇA O PASSO 1 AQUI !!!!!
-# Substitua pelo caminho absoluto do seu arquivo de banco de dados
-# Exemplo Windows: DB_FILE = "C:/Users/SeuNome/Documents/estagiarios.db"
-# Exemplo Mac/Linux: DB_FILE = "/home/seunome/documentos/estagiarios.db"
-DB_FILE = "estagiarios.db" 
+# Exemplo Windows: DB_FILE = "H:\GUILHERME PITA\6.EstagiariosApp/estagiarios.db"
+DB_FILE = "H:\GUILHERME PITA\6.EstagiariosApp/estagiarios.db" 
 
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
@@ -104,18 +101,16 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-# ===== FUNÇÃO MODIFICADA PARA DEPURAÇÃO =====
 def execute_write_query(query: str, params: tuple = ()):
     try:
-        st.info(f"DB WRITE: Tentando executar query: {query}") # MENSAGEM DE DEBUG
-        st.info(f"DB WRITE: Com os parâmetros: {params}") # MENSAGEM DE DEBUG
+        st.info(f"DB WRITE: Tentando executar query: {query}") 
+        st.info(f"DB WRITE: Com os parâmetros: {params}") 
         with sqlite3.connect(DB_FILE, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
-            st.info("DB WRITE: Commit realizado com sucesso.") # MENSAGEM DE SUCESSO DO COMMIT
+            st.info("DB WRITE: Commit realizado com sucesso.")
     except Exception as e:
-        # Captura QUALQUER erro e o exibe na tela
         st.error(f"!!!!!!!! ERRO GRAVE AO ESCREVER NO BANCO DE DADOS !!!!!!!!")
         st.error(f"Query: {query}")
         st.error(f"Parâmetros: {params}")
@@ -153,8 +148,9 @@ def get_config(key: str, default: Optional[str] = None) -> str:
 def set_config(key: str, value: str):
     execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
 
-# O restante do código permanece o mesmo...
+# ==========================
 # Funções de Lógica e CRUD
+# ==========================
 def log_action(action: str, details: str = ""):
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     execute_write_query("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
@@ -415,13 +411,12 @@ def page_cadastro():
                 
                 uni_default = est_data_para_edicao.get("universidade")
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
-                universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="universidade_select_edit")
+                st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="universidade_select_edit")
                 
-                universidade_final_edit = universidade_selecionada
-                if universidade_selecionada == "Outra (cadastrar manualmente)":
-                    universidade_final_edit = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="universidade_manual_edit").strip().upper()
+                if st.session_state.get("universidade_select_edit") == "Outra (cadastrar manualmente)":
+                    st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="universidade_manual_edit")
                 
-                termo_meses = meses_por_universidade(universidade_final_edit if universidade_final_edit else "")
+                termo_meses = meses_por_universidade(st.session_state.get("universidade_select_edit", ""))
                 renov_disabled = (termo_meses >= 24)
                 
                 c1, c2 = st.columns(2)
@@ -433,28 +428,48 @@ def page_cadastro():
                 
                 submitted = st.form_submit_button("💾 Salvar Alterações", use_container_width=True)
                 if submitted:
-                    nome_novo = st.session_state.nome_edit
-                    universidade_nova = st.session_state.universidade_manual_edit if st.session_state.universidade_select_edit == "Outra (cadastrar manualmente)" else st.session_state.universidade_select_edit
-                    data_adm_nova = st.session_state.data_adm_edit
-                    data_renov_nova = st.session_state.data_renov_edit
-                    obs_nova = st.session_state.obs_edit
+                    # ===== INÍCIO DA DEPURAÇÃO =====
+                    st.warning("--- DADOS NO MOMENTO DO SUBMIT (DEPURAÇÃO) ---")
+                    
+                    # Usamos .get() para evitar erros caso a chave não exista
+                    nome_novo_debug = st.session_state.get('nome_edit')
+                    uni_select_debug = st.session_state.get('universidade_select_edit')
+                    uni_manual_debug = st.session_state.get('universidade_manual_edit', 'N/A')
+                    data_adm_debug = st.session_state.get('data_adm_edit')
 
-                    if not nome_novo or not universidade_nova or not data_adm_nova:
-                        st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
+                    st.write(f"1. Conteúdo de `st.session_state.nome_edit`: **`{nome_novo_debug}`**")
+                    st.write(f"2. Conteúdo de `st.session_state.universidade_select_edit`: **`{uni_select_debug}`**")
+                    st.write(f"3. Conteúdo de `st.session_state.universidade_manual_edit`: **`{uni_manual_debug}`**")
+                    st.write(f"4. Conteúdo de `st.session_state.data_adm_edit`: **`{data_adm_debug}`**")
+
+                    universidade_nova = uni_manual_debug if uni_select_debug == "Outra (cadastrar manualmente)" and uni_manual_debug != 'N/A' else uni_select_debug
+                    
+                    st.write(f"**Variável `nome_novo` usada na verificação:** `{nome_novo_debug}`")
+                    st.write(f"**Variável `universidade_nova` usada na verificação:** `{universidade_nova}`")
+                    st.write(f"**Variável `data_adm_nova` usada na verificação:** `{data_adm_debug}`")
+                    st.warning("--- FIM DA DEPURAÇÃO ---")
+                    # ===== FIM DA DEPURAÇÃO =====
+
+                    if not nome_novo_debug or not universidade_nova or not data_adm_debug:
+                        st.session_state.message = {'text': "VERIFICAÇÃO FALHOU: Um campo obrigatório está vazio.", 'type': 'error'}
+                        st.rerun() # Adicionado para mostrar a mensagem de erro imediatamente
                     else:
-                        data_venc = calcular_vencimento_final(data_adm_nova)
+                        data_renov_nova = st.session_state.get('data_renov_edit')
+                        obs_nova = st.session_state.get('obs_edit')
+                        data_venc = calcular_vencimento_final(data_adm_debug)
+                        
                         update_estagiario(
                             st.session_state.id_para_editar,
-                            nome_novo.strip().upper(),
-                            universidade_nova,
-                            data_adm_nova,
+                            nome_novo_debug.strip().upper(),
+                            universidade_nova.strip().upper(),
+                            data_adm_debug,
                             data_renov_nova if not renov_disabled else None,
                             obs_nova.strip().upper(),
                             data_venc
                         )
-                        st.session_state.message = {'text': f"Dados de {nome_novo.strip().upper()} atualizados com sucesso!", 'type': 'success'}
-                    
-                    st.rerun()
+                        st.session_state.message = {'text': f"Dados de {nome_novo_debug.strip().upper()} atualizados com sucesso!", 'type': 'success'}
+                        st.rerun()
+
 
             c_delete, c_cancel = st.columns(2)
             if c_delete.button("🗑️ Excluir Estagiário", use_container_width=True):
