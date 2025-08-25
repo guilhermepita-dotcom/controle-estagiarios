@@ -92,28 +92,38 @@ def load_custom_css():
     """, unsafe_allow_html=True)
 
 # ==========================
-# Banco de Dados (Nova Arquitetura)
+# Banco de Dados (Arquitetura Robusta)
 # ==========================
 @st.cache_resource
 def get_read_connection():
-    """Conexão em cache apenas para LEITURA de dados."""
-    conn = sqlite3.connect(f'file:{DB_FILE}?mode=ro', check_same_thread=False, uri=True)
-    conn.row_factory = sqlite3.Row
-    return conn
+    """Conexão em cache apenas para LEITURA de dados, em modo read-only (ro)."""
+    try:
+        # Tenta conectar em modo read-only
+        conn = sqlite3.connect(f'file:{DB_FILE}?mode=ro', check_same_thread=False, uri=True)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except sqlite3.OperationalError:
+        # Se o modo read-only falhar (ex: na primeira execução quando o DB não existe), usa o modo normal.
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 def execute_write_query(query: str, params: tuple = ()):
     """Função segura para todas as operações de ESCRITA (INSERT, UPDATE, DELETE)."""
     try:
-        with sqlite3.connect(DB_FILE) as conn:
+        # Conecta, executa, comita e fecha. Usa modo WAL para mais robustez.
+        with sqlite3.connect(DB_FILE, timeout=10) as conn:
+            conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
         # Após a escrita, limpa o cache da conexão de leitura para forçar a recarga.
         st.cache_resource.clear()
     except sqlite3.Error as e:
         st.error(f"Erro ao escrever no banco de dados: {e}")
+        st.stop()
 
 def init_db():
-    # Usa a função de escrita para garantir a criação das tabelas
+    # A função execute_write_query agora cuida da criação e commits.
     execute_write_query("""
         CREATE TABLE IF NOT EXISTS estagiarios (
             id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL,
@@ -191,9 +201,10 @@ def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date,
 def delete_estagiario(est_id: int, nome: str):
     execute_write_query("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
+    
+# O restante do código, que não mexe diretamente com a conexão do banco de dados, permanece inalterado.
+# (Funções de cálculo, lógica de exibição das páginas, etc.)
 
-# O restante do código (lógica de cálculo, páginas e main) permanece o mesmo,
-# pois as chamadas às funções de CRUD não mudaram.
 def normalize_text(text: str) -> str:
     if not isinstance(text, str): return ""
     return "".join(c for c in unicodedata.normalize('NFD', text.lower()) if unicodedata.category(c) != 'Mn')
