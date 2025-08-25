@@ -431,7 +431,6 @@ def page_cadastro():
                     # ===== INÍCIO DA DEPURAÇÃO =====
                     st.warning("--- DADOS NO MOMENTO DO SUBMIT (DEPURAÇÃO) ---")
                     
-                    # Usamos .get() para evitar erros caso a chave não exista
                     nome_novo_debug = st.session_state.get('nome_edit')
                     uni_select_debug = st.session_state.get('universidade_select_edit')
                     uni_manual_debug = st.session_state.get('universidade_manual_edit', 'N/A')
@@ -450,9 +449,14 @@ def page_cadastro():
                     st.warning("--- FIM DA DEPURAÇÃO ---")
                     # ===== FIM DA DEPURAÇÃO =====
 
+                    # ***** NOVA LINHA PARA PAUSAR O SCRIPT *****
+                    st.error("PAUSA PARA DEPURAÇÃO. Por favor, copie as informações da caixa amarela e envie.")
+                    st.stop() # Esta linha vai "congelar" a tela para você poder ler.
+
+                    # O código abaixo não será executado por causa do st.stop(), o que é intencional para esta fase de depuração.
                     if not nome_novo_debug or not universidade_nova or not data_adm_debug:
                         st.session_state.message = {'text': "VERIFICAÇÃO FALHOU: Um campo obrigatório está vazio.", 'type': 'error'}
-                        st.rerun() # Adicionado para mostrar a mensagem de erro imediatamente
+                        st.rerun() 
                     else:
                         data_renov_nova = st.session_state.get('data_renov_edit')
                         obs_nova = st.session_state.get('obs_edit')
@@ -695,3 +699,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
