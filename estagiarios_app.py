@@ -14,10 +14,7 @@ import pytz
 # ==========================
 # Configurações e Constantes
 # ==========================
-
-# Exemplo Windows: DB_FILE = "H:\GUILHERME PITA\6.EstagiariosApp/estagiarios.db"
-DB_FILE = "H:\GUILHERME PITA\6.EstagiariosApp/estagiarios.db" 
-
+DB_FILE = "estagiarios.db" 
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
@@ -103,19 +100,12 @@ def get_db_connection():
 
 def execute_write_query(query: str, params: tuple = ()):
     try:
-        st.info(f"DB WRITE: Tentando executar query: {query}") 
-        st.info(f"DB WRITE: Com os parâmetros: {params}") 
         with sqlite3.connect(DB_FILE, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
-            st.info("DB WRITE: Commit realizado com sucesso.")
     except Exception as e:
-        st.error(f"!!!!!!!! ERRO GRAVE AO ESCREVER NO BANCO DE DADOS !!!!!!!!")
-        st.error(f"Query: {query}")
-        st.error(f"Parâmetros: {params}")
-        st.error(f"Tipo do Erro: {type(e).__name__}")
-        st.error(f"Mensagem do Erro: {e}")
+        st.error(f"Erro ao escrever no banco de dados: {e}")
         st.stop()
 
 
@@ -413,8 +403,10 @@ def page_cadastro():
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
                 st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="universidade_select_edit")
                 
+                # Renderiza o campo de texto manual condicionalmente
+                universidade_manual_default = uni_default if uni_default not in universidades_padrao else ""
                 if st.session_state.get("universidade_select_edit") == "Outra (cadastrar manualmente)":
-                    st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="universidade_manual_edit")
+                    st.text_input("Digite o nome da Universidade*", value=universidade_manual_default, key="universidade_manual_edit")
                 
                 termo_meses = meses_por_universidade(st.session_state.get("universidade_select_edit", ""))
                 renov_disabled = (termo_meses >= 24)
@@ -428,51 +420,35 @@ def page_cadastro():
                 
                 submitted = st.form_submit_button("💾 Salvar Alterações", use_container_width=True)
                 if submitted:
-                    # ===== INÍCIO DA DEPURAÇÃO =====
-                    st.warning("--- DADOS NO MOMENTO DO SUBMIT (DEPURAÇÃO) ---")
+                    nome_novo = st.session_state.get('nome_edit')
+                    uni_select = st.session_state.get('universidade_select_edit')
                     
-                    nome_novo_debug = st.session_state.get('nome_edit')
-                    uni_select_debug = st.session_state.get('universidade_select_edit')
-                    uni_manual_debug = st.session_state.get('universidade_manual_edit', 'N/A')
-                    data_adm_debug = st.session_state.get('data_adm_edit')
+                    if uni_select == "Outra (cadastrar manualmente)":
+                        universidade_nova = st.session_state.get('universidade_manual_edit')
+                    else:
+                        universidade_nova = uni_select
 
-                    st.write(f"1. Conteúdo de `st.session_state.nome_edit`: **`{nome_novo_debug}`**")
-                    st.write(f"2. Conteúdo de `st.session_state.universidade_select_edit`: **`{uni_select_debug}`**")
-                    st.write(f"3. Conteúdo de `st.session_state.universidade_manual_edit`: **`{uni_manual_debug}`**")
-                    st.write(f"4. Conteúdo de `st.session_state.data_adm_edit`: **`{data_adm_debug}`**")
+                    data_adm_nova = st.session_state.get('data_adm_edit')
 
-                    universidade_nova = uni_manual_debug if uni_select_debug == "Outra (cadastrar manualmente)" and uni_manual_debug != 'N/A' else uni_select_debug
-                    
-                    st.write(f"**Variável `nome_novo` usada na verificação:** `{nome_novo_debug}`")
-                    st.write(f"**Variável `universidade_nova` usada na verificação:** `{universidade_nova}`")
-                    st.write(f"**Variável `data_adm_nova` usada na verificação:** `{data_adm_debug}`")
-                    st.warning("--- FIM DA DEPURAÇÃO ---")
-                    # ===== FIM DA DEPURAÇÃO =====
-
-                    # ***** NOVA LINHA PARA PAUSAR O SCRIPT *****
-                    st.error("PAUSA PARA DEPURAÇÃO. Por favor, copie as informações da caixa amarela e envie.")
-                    st.stop() # Esta linha vai "congelar" a tela para você poder ler.
-
-                    # O código abaixo não será executado por causa do st.stop(), o que é intencional para esta fase de depuração.
-                    if not nome_novo_debug or not universidade_nova or not data_adm_debug:
+                    if not nome_novo or not universidade_nova or not data_adm_nova:
                         st.session_state.message = {'text': "VERIFICAÇÃO FALHOU: Um campo obrigatório está vazio.", 'type': 'error'}
-                        st.rerun() 
                     else:
                         data_renov_nova = st.session_state.get('data_renov_edit')
                         obs_nova = st.session_state.get('obs_edit')
-                        data_venc = calcular_vencimento_final(data_adm_debug)
+                        data_venc = calcular_vencimento_final(data_adm_nova)
                         
                         update_estagiario(
                             st.session_state.id_para_editar,
-                            nome_novo_debug.strip().upper(),
+                            nome_novo.strip().upper(),
                             universidade_nova.strip().upper(),
-                            data_adm_debug,
+                            data_adm_nova,
                             data_renov_nova if not renov_disabled else None,
                             obs_nova.strip().upper(),
                             data_venc
                         )
-                        st.session_state.message = {'text': f"Dados de {nome_novo_debug.strip().upper()} atualizados com sucesso!", 'type': 'success'}
-                        st.rerun()
+                        st.session_state.message = {'text': f"Dados de {nome_novo.strip().upper()} atualizados com sucesso!", 'type': 'success'}
+                    
+                    st.rerun()
 
 
             c_delete, c_cancel = st.columns(2)
@@ -699,4 +675,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-
+    
