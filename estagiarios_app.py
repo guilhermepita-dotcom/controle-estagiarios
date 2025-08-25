@@ -38,7 +38,7 @@ universidades_padrao = [
     "IMPA – Instituto de Matemática Pura e Aplicada",
     "ISERJ – Instituto Superior de Educação do Rio de Janeiro",
     "Mackenzie Rio – Universidade Presbiteriana Mackenzie",
-    "PUC-Rio – Pontífícia Universidade Católica do Rio de Janeiro",
+    "PUC-Rio – Pontifícia Universidade Católica do Rio de Janeiro",
     "Santa Úrsula – Associação Universitária Santa Úrsula",
     "UCAM – Universidade Cândido Mendes",
     "UCB – Universidade Castelo Branco",
@@ -94,9 +94,7 @@ def load_custom_css():
 # ==========================
 # Banco de Dados (Arquitetura Robusta)
 # ==========================
-# <-- MUDANÇA 1: Removido @st.cache_resource para garantir dados sempre atualizados
-def get_read_connection():
-    # A conexão agora é sempre nova, evitando cache de dados.
+def get_db_connection():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
@@ -107,8 +105,6 @@ def execute_write_query(query: str, params: tuple = ()):
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute(query, params)
             conn.commit()
-        # st.cache_resource.clear() foi mantido caso algum outro cache seja adicionado no futuro.
-        st.cache_resource.clear()
     except sqlite3.Error as e:
         st.error(f"Erro ao escrever no banco de dados: {e}")
         st.stop()
@@ -118,18 +114,32 @@ def init_db():
     execute_write_query("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
     execute_write_query("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
     execute_write_query("CREATE TABLE IF NOT EXISTS logs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL, action TEXT NOT NULL, details TEXT)")
-    if not get_config('regras_iniciadas'):
-        for kw, meses in DEFAULT_REGRAS: add_regra(kw.upper(), meses)
-        set_config('regras_iniciadas', 'true')
-    if not get_config('proximos_dias'): set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
-    if not get_config('admin_password'): set_config('admin_password', '123456')
+    
+    conn = get_db_connection()
+    try:
+        config_check = conn.execute("SELECT value FROM config WHERE key='regras_iniciadas'").fetchone()
+        if not config_check:
+            for kw, meses in DEFAULT_REGRAS:
+                execute_write_query("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper().strip(), meses))
+            execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
+        
+        config_check = conn.execute("SELECT value FROM config WHERE key='proximos_dias'").fetchone()
+        if not config_check:
+            execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
+        
+        config_check = conn.execute("SELECT value FROM config WHERE key='admin_password'").fetchone()
+        if not config_check:
+            execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
+    finally:
+        conn.close()
 
 def get_config(key: str, default: Optional[str] = None) -> str:
-    # Usa uma conexão de leitura nova a cada chamada
-    conn = get_read_connection()
-    row = conn.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
-    conn.close()
-    return row['value'] if row else (default if default is not None else "")
+    conn = get_db_connection()
+    try:
+        row = conn.execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+        return row['value'] if row else (default if default is not None else "")
+    finally:
+        conn.close()
 
 def set_config(key: str, value: str):
     execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
@@ -142,7 +152,11 @@ def log_action(action: str, details: str = ""):
     execute_write_query("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
 
 def list_regras() -> pd.DataFrame:
-    return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_read_connection())
+    conn = get_db_connection()
+    try:
+        return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", conn)
+    finally:
+        conn.close()
 
 def add_regra(keyword: str, meses: int):
     execute_write_query("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
@@ -153,10 +167,14 @@ def delete_regra(regra_id: int, keyword: str):
     log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
 
 def get_estagiarios_df() -> pd.DataFrame:
+    conn = get_db_connection()
     try:
-        df = pd.read_sql_query("SELECT * FROM estagiarios", get_read_connection(), index_col="id")
+        df = pd.read_sql_query("SELECT * FROM estagiarios", conn, index_col="id")
     except (pd.io.sql.DatabaseError, ValueError):
         return pd.DataFrame()
+    finally:
+        conn.close()
+
     if df.empty: return df
     for col in ['data_admissao', 'data_ult_renovacao', 'data_vencimento']:
         df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -166,7 +184,6 @@ def get_estagiarios_df() -> pd.DataFrame:
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     query = "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)"
-    # <-- MUDANÇA 2: Usando isoformat() para salvar datas
     params = (
         nome, universidade, data_adm.isoformat(), 
         data_renov.isoformat() if data_renov else None, 
@@ -178,7 +195,6 @@ def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: 
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
     query = "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?"
-    # <-- MUDANÇA 2: Usando isoformat() para salvar datas
     params = (
         nome, universidade, data_adm.isoformat(), 
         data_renov.isoformat() if data_renov else None, 
@@ -200,6 +216,7 @@ def normalize_text(text: str) -> str:
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
     df_regras = list_regras()
+    if df_regras.empty: return DEFAULT_DURATION_OTHERS
     regras_dict = {row["keyword"]: int(row["meses"]) for _, row in df_regras.iterrows()}
     return regras_dict.get(universidade.upper(), DEFAULT_DURATION_OTHERS)
 
@@ -238,42 +255,51 @@ def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataF
     df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
     regras_df = list_regras()
-    regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
-    df_proc['data_ult_renovacao_str'] = ''
-    if regras_24m_keywords:
-        mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
-        df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
-    df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
+    if not regras_df.empty:
+        regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
+        if regras_24m_keywords:
+            df_proc['data_ult_renovacao_str'] = ''
+            mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
+            df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
+            df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
+    else:
+        df_proc['data_ult_renovacao_str'] = df_proc['data_ult_renovacao'].apply(lambda x: x.strftime('%d.%m.%Y') if pd.notna(x) else '')
+        
     for col in ["data_admissao", "data_vencimento"]:
         df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
     df_proc = df_proc.rename(columns={'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?', 'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'})
     return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
-    query = "SELECT timestamp, action, details FROM logs ORDER BY id DESC LIMIT 50"
-    params = {}
-    if start_date and end_date:
-        query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id DESC LIMIT 50"
-        params = (start_date.isoformat(), end_date.isoformat())
-    df = pd.read_sql_query(query, get_read_connection(), params=params)
-    return df
+    conn = get_db_connection()
+    try:
+        query = "SELECT timestamp, action, details FROM logs ORDER BY id DESC LIMIT 50"
+        params = ()
+        if start_date and end_date:
+            query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id DESC LIMIT 50"
+            params = (start_date.isoformat(), end_date.isoformat())
+        return pd.read_sql_query(query, conn, params=params)
+    finally:
+        conn.close()
 
 def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
-    query = "SELECT timestamp, action, details FROM logs ORDER BY id ASC"
-    params = {}
-    if start_date and end_date:
-        query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id ASC"
-        params = (start_date.isoformat(), end_date.isoformat())
-    df = pd.read_sql_query(query, get_read_connection(), params=params)
-    return df.to_string(index=False).encode('utf-8')
+    conn = get_db_connection()
+    try:
+        query = "SELECT timestamp, action, details FROM logs ORDER BY id ASC"
+        params = ()
+        if start_date and end_date:
+            query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id ASC"
+            params = (start_date.isoformat(), end_date.isoformat())
+        df = pd.read_sql_query(query, conn, params=params)
+        return df.to_string(index=False).encode('utf-8')
+    finally:
+        conn.close()
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export = df.copy()
-        for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
-            if col in df_export.columns:
-                    df_export[col] = pd.to_datetime(df_export[col], errors='coerce').dt.date
+        # As datas já estão como objetos datetime no DataFrame original
         df_export.to_excel(writer, index=False, sheet_name='Estagiarios')
     return output.getvalue()
 
@@ -282,6 +308,8 @@ def show_message(message: Dict[str, Any]):
     text = message.get('text', 'Ação concluída.')
     icon_map = {'success': '✅', 'warning': '⚠️', 'error': '❌', 'info': 'ℹ️'}
     st.toast(text, icon=icon_map.get(msg_type, 'ℹ️'))
+
+# ... (As funções das páginas permanecem as mesmas, mas serão mais confiáveis agora)
 
 def page_dashboard():
     st.header("Dashboard de Contratos")
@@ -315,8 +343,9 @@ def page_dashboard():
         else:
             colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
             st.dataframe(df_view[colunas_ordenadas], use_container_width=True, hide_index=True)
-            df_export_raw = df_raw[df_raw['id'].isin(df_view['ID'])]
-            st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_export_raw), "estagiarios_filtrados.xlsx", key="download_dashboard")
+            df_export_raw = get_estagiarios_df() # Pega dados frescos
+            df_export_filtered = df_export_raw[df_export_raw['id'].isin(df_view['ID'])]
+            st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_export_filtered), "estagiarios_filtrados.xlsx", key="download_dashboard")
     else:
         st.info("ℹ️ Utilize os filtros acima para pesquisar e exibir os dados dos estagiários.")
 
@@ -338,7 +367,6 @@ def page_cadastro():
     st.divider()
     if st.session_state.sub_menu_cad == "Novo":
         st.subheader("Cadastrar Novo Estagiário")
-        # Usando um formulário para o cadastro também, para consistência
         with st.form("form_novo", clear_on_submit=True):
             nome = st.text_input("Nome*").strip().upper()
             universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...")
@@ -374,21 +402,15 @@ def page_cadastro():
         df_estagiarios = get_estagiarios_df()
 
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
+            # Pega os dados mais recentes para popular o formulário
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
 
             with st.form("form_edicao"):
-                if 'current_edit_id' not in st.session_state or st.session_state.current_edit_id != st.session_state.id_para_editar:
-                    st.session_state.edit_nome = est_data_para_edicao["nome"]
-                    st.session_state.edit_universidade = est_data_para_edicao.get("universidade")
-                    st.session_state.edit_data_adm = est_data_para_edicao["data_admissao"].date()
-                    st.session_state.edit_data_renov = None if pd.isna(est_data_para_edicao["data_ult_renovacao"]) else est_data_para_edicao["data_ult_renovacao"].date()
-                    st.session_state.edit_obs = est_data_para_edicao.get("obs", "")
-                    st.session_state.current_edit_id = st.session_state.id_para_editar
-
-                nome_edit = st.text_input("Nome*", value=st.session_state.edit_nome)
+                # Popula os campos com os dados lidos
+                nome_edit = st.text_input("Nome*", value=est_data_para_edicao["nome"])
                 
-                uni_default = st.session_state.edit_universidade
+                uni_default = est_data_para_edicao.get("universidade")
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
                 universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index)
                 
@@ -400,11 +422,11 @@ def page_cadastro():
                 renov_disabled = (termo_meses >= 24)
                 
                 c1, c2 = st.columns(2)
-                data_adm_edit = c1.date_input("Data de Admissão*", value=st.session_state.edit_data_adm)
-                data_renov_edit = c2.date_input("Data da Última Renovação", value=st.session_state.edit_data_renov, disabled=renov_disabled)
+                data_adm_edit = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"].date())
+                data_renov_edit = c2.date_input("Data da Última Renovação", value=None if pd.isna(est_data_para_edicao["data_ult_renovacao"]) else est_data_para_edicao["data_ult_renovacao"].date(), disabled=renov_disabled)
                 if renov_disabled: c2.info("Contrato único. Não requer renovação.")
                 
-                obs_edit = st.text_area("Observações", value=st.session_state.edit_obs)
+                obs_edit = st.text_area("Observações", value=est_data_para_edicao.get("obs", ""))
                 
                 submitted = st.form_submit_button("💾 Salvar Alterações", use_container_width=True)
                 if submitted:
@@ -422,18 +444,15 @@ def page_cadastro():
                             data_venc
                         )
                         st.session_state.message = {'text': f"Dados de {nome_edit.strip().upper()} atualizados!", 'type': 'success'}
-                    
-                    # <-- MUDANÇA 4: Não limpa o estado, apenas recarrega a página.
                     st.rerun()
 
             c_delete, c_cancel = st.columns(2)
             if c_delete.button("🗑️ Excluir Estagiário", use_container_width=True):
-                st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': st.session_state.edit_nome}
+                st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': est_data_para_edicao["nome"]}
                 st.rerun()
 
             if c_cancel.button("Cancelar Edição", use_container_width=True):
                 st.session_state.id_para_editar = None
-                st.session_state.current_edit_id = None
                 st.rerun()
             
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
@@ -445,7 +464,6 @@ def page_cadastro():
                     st.session_state.message = {'text': 'Estagiário excluído com sucesso!', 'type': 'success'}
                     st.session_state.confirm_delete_id = None
                     st.session_state.id_para_editar = None
-                    st.session_state.current_edit_id = None
                     st.session_state.sub_menu_cad = None
                     st.rerun()
                 if c2_del.button("NÃO, CANCELAR", key="cancel_del_btn"):
