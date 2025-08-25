@@ -132,7 +132,6 @@ def init_db():
         )
     """)
     
-    # Popula regras e configurações padrão se não existirem
     if not c.execute("SELECT 1 FROM config WHERE key='regras_iniciadas'").fetchone():
         for kw, meses in DEFAULT_REGRAS:
             c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
@@ -160,7 +159,6 @@ def log_action(action: str, details: str = ""):
     conn.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
     conn.commit()
 
-# --- CRUD de Regras ---
 def list_regras() -> pd.DataFrame:
     return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
 
@@ -176,9 +174,7 @@ def delete_regra(regra_id: int, keyword: str):
     conn.commit()
     log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
 
-# --- CRUD de Estagiários ---
 def get_estagiarios_df() -> pd.DataFrame:
-    """Busca os dados do DB e os retorna em um DataFrame com tipos de dados corretos."""
     try:
         df = pd.read_sql_query("SELECT * FROM estagiarios", get_db_connection(), index_col="id")
     except (pd.io.sql.DatabaseError, ValueError):
@@ -186,7 +182,6 @@ def get_estagiarios_df() -> pd.DataFrame:
     if df.empty:
         return df
     
-    # Converte colunas de data para datetime objects para processamento
     for col in ['data_admissao', 'data_ult_renovacao', 'data_vencimento']:
         df[col] = pd.to_datetime(df[col], errors='coerce')
 
@@ -214,11 +209,9 @@ def delete_estagiario(est_id: int, nome: str):
     conn.commit()
     log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
-# --- Lógica de Negócio e Cálculos ---
 def meses_por_universidade(universidade: str) -> int:
     if not universidade: return DEFAULT_DURATION_OTHERS
     df_regras = list_regras()
-    # Cacheia o resultado para evitar múltiplas buscas no DF
     regras_dict = {row["keyword"]: int(row["meses"]) for _, row in df_regras.iterrows()}
     return regras_dict.get(universidade.upper(), DEFAULT_DURATION_OTHERS)
 
@@ -252,7 +245,6 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
 
-# --- Funções de Logs e Exportação ---
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
     query = "SELECT timestamp, action, details FROM logs"
     params = {}
@@ -273,18 +265,15 @@ def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[da
     return df.to_string(index=False).encode('utf-8')
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
-    """Exporta um DataFrame para um arquivo Excel em memória."""
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df_export = df.copy()
-        # Formata datas para o excel
         for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
             if col in df_export.columns:
                  df_export[col] = pd.to_datetime(df_export[col]).dt.date
         df_export.to_excel(writer, index=False, sheet_name='Estagiarios')
     return output.getvalue()
 
-# --- Funções de UI Auxiliares ---
 def show_message(message: Dict[str, Any]):
     msg_type = message.get('type', 'info')
     text = message.get('text', 'Ação concluída.')
@@ -312,7 +301,6 @@ def page_dashboard():
         st.info("Nenhum estagiário cadastrado ainda.")
         return
 
-    # --- Métricas ---
     df["status"] = df["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("👥 Total de Estagiários", len(df))
@@ -321,55 +309,52 @@ def page_dashboard():
     c4.metric("⛔ Contratos Vencidos", (df["status"] == "Vencido").sum())
     st.divider()
 
-    # --- Filtros ---
     filtros_c1, filtros_c2 = st.columns(2)
     filtro_status = filtros_c1.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"])
     filtro_nome = filtros_c2.text_input("🔎 Buscar por Nome do Estagiário")
 
-    # --- Aplica Filtros ---
-    df_view = df.copy()
-    if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
-    if filtro_nome.strip(): df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
+    # <<< ALTERAÇÃO AQUI: A tabela só aparece se houver filtro >>>
+    if filtro_status or filtro_nome.strip():
+        df_view = df.copy()
+        if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
+        if filtro_nome.strip(): df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
 
-    if df_view.empty:
-        st.warning("Nenhum registro encontrado para os filtros selecionados.")
-        return
-        
-    # --- Preparação para Exibição ---
-    df_display = df_view.copy()
-    df_display["proxima_renovacao"] = df_display.apply(calcular_proxima_renovacao, axis=1)
-    df_display["ultimo_ano"] = df_display["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
-    
-    # Adiciona "Contrato Único"
-    regras_df = list_regras()
-    regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
-    if regras_24m_keywords:
-        mask = (df_display['universidade'].str.upper().isin(regras_24m_keywords)) & (df_display['data_ult_renovacao'].isnull())
-        df_display.loc[mask, 'data_ult_renovacao_str'] = "Contrato Único"
+        if df_view.empty:
+            st.warning("Nenhum registro encontrado para os filtros selecionados.")
+        else:
+            df_display = df_view.copy()
+            df_display["proxima_renovacao"] = df_display.apply(calcular_proxima_renovacao, axis=1)
+            df_display["ultimo_ano"] = df_display["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
+            
+            regras_df = list_regras()
+            regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
+            df_display['data_ult_renovacao_str'] = ''
+            if regras_24m_keywords:
+                mask = (df_display['universidade'].str.upper().isin(regras_24m_keywords)) & (df_display['data_ult_renovacao'].isnull())
+                df_display.loc[mask, 'data_ult_renovacao_str'] = "Contrato Único"
+            
+            for col in ["data_admissao", "data_vencimento"]:
+                df_display[col] = df_display[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
+            
+            df_display['data_ult_renovacao_str'] = df_display.apply(
+                lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
+                            row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
+                axis=1
+            )
+
+            df_display = df_display.rename(columns={
+                'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
+                'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:',
+                'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
+                'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
+            })
+            
+            colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
+            st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
+            
+            st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
     else:
-        df_display['data_ult_renovacao_str'] = ''
-        
-    # Formata datas para string na exibição
-    for col in ["data_admissao", "data_vencimento"]:
-        df_display[col] = df_display[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
-    
-    df_display['data_ult_renovacao_str'] = df_display.apply(
-        lambda row: row['data_ult_renovacao_str'] if pd.notna(row['data_ult_renovacao_str']) and row['data_ult_renovacao_str'] != '' else
-                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
-        axis=1
-    )
-
-    df_display = df_display.rename(columns={
-        'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
-        'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:',
-        'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
-        'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
-    })
-    
-    colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
-    st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
-    
-    st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
+        st.info("ℹ️ Utilize os filtros acima para pesquisar e exibir os dados dos estagiários.")
 
 
 def page_cadastro():
@@ -384,14 +369,13 @@ def page_cadastro():
     if cols[1].button("🔎 Consultar / Editar", use_container_width=True): st.session_state.sub_menu_cad = "Editar"
     st.divider()
 
-    # --- LÓGICA DE CADASTRO NOVO ---
     if st.session_state.sub_menu_cad == "Novo":
         with st.form("form_new_cadastro"):
             st.subheader("Cadastrar Novo Estagiário")
             nome = st.text_input("Nome*").strip().upper()
             
             universidade = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...")
-            if universidade == "Outra (cadastrar manually)":
+            if universidade == "Outra (cadastrar manualmente)":
                 universidade = st.text_input("Digite o nome da Universidade*").strip().upper()
 
             c1, c2 = st.columns(2)
@@ -415,7 +399,6 @@ def page_cadastro():
                 st.session_state.sub_menu_cad = None
                 st.rerun()
 
-    # --- LÓGICA DE EDIÇÃO ---
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
         if df_estagiarios.empty:
@@ -527,44 +510,57 @@ def page_regras():
 def page_import_export():
     st.header("Importar e Exportar Dados")
     
-    with st.expander("📥 Exportar Todos os Dados para Excel"):
+    # <<< ALTERAÇÃO AQUI: Melhoria no fluxo de importação >>>
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.subheader("📥 Exportar Todos os Dados")
         df_export = get_estagiarios_df()
         st.download_button(
-            label="Baixar Planilha Completa",
+            label="Baixar Planilha Completa (.xlsx)",
             data=exportar_para_excel_bytes(df_export),
             file_name="estagiarios_export_completo.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
 
-    with st.expander("📤 Importar de Arquivo Excel (.xlsx)"):
-        st.info("O arquivo deve conter as colunas: `nome`, `universidade`, `data_admissao`. Colunas opcionais: `data_ult_renovacao`, `obs`.")
-        arquivo = st.file_uploader("Selecione o arquivo Excel", type=["xlsx"])
-        if arquivo:
-            try:
-                df_import = pd.read_excel(arquivo)
-                count = 0
-                required_cols = ['nome', 'universidade', 'data_admissao']
-                if not all(col in df_import.columns for col in required_cols):
-                    st.error(f"O arquivo precisa ter as colunas obrigatórias: {', '.join(required_cols)}")
-                else:
-                    with st.spinner("Importando dados..."):
-                        for _, row in df_import.iterrows():
-                            try:
-                                nome = str(row["nome"]).strip().upper()
-                                universidade = str(row["universidade"]).strip().upper()
-                                data_adm = pd.to_datetime(row["data_admissao"]).date()
-                                if nome and universidade and data_adm:
-                                    data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
-                                    obs = str(row.get("obs","")).strip().upper()
-                                    data_venc = calcular_vencimento_final(data_adm)
-                                    insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
-                                    count += 1
-                            except Exception as e:
-                                st.warning(f"Erro ao importar a linha com nome '{row.get('nome', 'N/A')}': {e}")
-                    show_message({'text': f"{count} estagiários importados com sucesso!", 'type': 'success'})
-            except Exception as e:
-                st.error(f"Não foi possível ler o arquivo. Erro: {e}")
+    with c2:
+        st.subheader("📤 Importar de Arquivo Excel")
+        st.info("Colunas obrigatórias: `nome`, `universidade`, `data_admissao`.")
+        
+        with st.form("form_import"):
+            arquivo = st.file_uploader("Selecione o arquivo Excel (.xlsx)", type=["xlsx"])
+            submitted = st.form_submit_button("Iniciar Importação", use_container_width=True)
+
+            if submitted and arquivo:
+                try:
+                    df_import = pd.read_excel(arquivo)
+                    required_cols = ['nome', 'universidade', 'data_admissao']
+                    
+                    if not all(col in df_import.columns for col in required_cols):
+                        st.error(f"O arquivo precisa ter as colunas obrigatórias: {', '.join(required_cols)}")
+                    else:
+                        count = 0
+                        with st.spinner("Importando dados..."):
+                            for _, row in df_import.iterrows():
+                                try:
+                                    nome = str(row["nome"]).strip().upper()
+                                    universidade = str(row["universidade"]).strip().upper()
+                                    data_adm = pd.to_datetime(row["data_admissao"]).date()
+                                    if nome and universidade and data_adm:
+                                        data_renov = pd.to_datetime(row.get("data_ult_renovacao")).date() if pd.notna(row.get("data_ult_renovacao")) else None
+                                        obs = str(row.get("obs","")).strip().upper()
+                                        data_venc = calcular_vencimento_final(data_adm)
+                                        insert_estagiario(nome, universidade, data_adm, data_renov, obs, data_venc)
+                                        count += 1
+                                except Exception as e:
+                                    st.warning(f"Erro ao importar a linha com nome '{row.get('nome', 'N/A')}': {e}")
+                        st.success(f"{count} estagiários importados com sucesso!")
+                except Exception as e:
+                    st.error(f"Não foi possível ler o arquivo. Erro: {e}")
+            elif submitted and not arquivo:
+                st.warning("Por favor, selecione um arquivo para importar.")
+
 
 def page_admin():
     st.header("🔑 Área Administrativa")
@@ -624,7 +620,6 @@ def main():
     load_custom_css()
     init_db()
 
-    # --- CABEÇALHO COM LOGO E MENU ---
     c1, c2 = st.columns([1, 4], vertical_alignment="center")
     if os.path.exists(LOGO_FILE): c1.image(LOGO_FILE, width=150)
     
@@ -641,17 +636,14 @@ def main():
         )
     st.divider()
     
-    # --- Lógica para limpar o estado ao trocar de página ---
     if 'main_selection' not in st.session_state or selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
-        # Lista de chaves de estado que devem ser resetadas ao mudar de página
         keys_to_reset = ['sub_menu_cad', 'confirm_delete_id']
         for key in keys_to_reset:
             if key in st.session_state:
                 st.session_state[key] = None
         st.rerun()
 
-    # --- Roteador de Páginas ---
     page_mapper = {
         "Dashboard": page_dashboard,
         "Cadastro": page_cadastro,
@@ -660,7 +652,6 @@ def main():
         "Área Administrativa": page_admin
     }
     
-    # Executa a função da página selecionada
     if selected in page_mapper:
         page_mapper[selected]()
 
