@@ -74,7 +74,6 @@ st.set_page_config(page_title="Controle de Estagiários", layout="wide", page_ic
 def load_custom_css():
     st.markdown("""
         <style>
-            /* Seu CSS completo aqui... (mantido como no original para brevidade) */
             @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap');
             :root {
                 --primary-color: #E2A144; --background-color: #0F0F0F;
@@ -155,9 +154,7 @@ def set_config(key: str, value: str):
 # Funções de Lógica e CRUD
 # ==========================
 def normalize_text(text: str) -> str:
-    """Converte string para minúsculas e remove acentos."""
-    if not isinstance(text, str):
-        return ""
+    if not isinstance(text, str): return ""
     return "".join(c for c in unicodedata.normalize('NFD', text.lower()) if unicodedata.category(c) != 'Mn')
 
 def log_action(action: str, details: str = ""):
@@ -186,8 +183,7 @@ def get_estagiarios_df() -> pd.DataFrame:
         df = pd.read_sql_query("SELECT * FROM estagiarios", get_db_connection(), index_col="id")
     except (pd.io.sql.DatabaseError, ValueError):
         return pd.DataFrame()
-    if df.empty:
-        return df
+    if df.empty: return df
     
     for col in ['data_admissao', 'data_ult_renovacao', 'data_vencimento']:
         df[col] = pd.to_datetime(df[col], errors='coerce')
@@ -238,7 +234,6 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     data_ult_renov = row.get('data_ult_renovacao', pd.NaT).date() if pd.notna(row.get('data_ult_renovacao')) else None
     
     if not data_adm: return ""
-
     termo_meses = meses_por_universidade(row['universidade'])
     if termo_meses >= 24: return ""
     
@@ -293,7 +288,6 @@ def show_message(message: Dict[str, Any]):
 
 def page_dashboard():
     st.header("Dashboard de Contratos")
-    
     proximos_dias_input = st.number_input(
         "'Venc. Próximo' (dias)", min_value=1, max_value=120, 
         value=int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS)), step=1,
@@ -303,7 +297,6 @@ def page_dashboard():
         set_config("proximos_dias", str(proximos_dias_input))
 
     df = get_estagiarios_df()
-
     if df.empty:
         st.info("Nenhum estagiário cadastrado ainda.")
         return
@@ -345,23 +338,19 @@ def page_dashboard():
             df_display['data_ult_renovacao_str'] = df_display.apply(
                 lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
                             row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
-                axis=1
-            )
+                axis=1)
 
             df_display = df_display.rename(columns={
-                'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade',
-                'data_admissao': 'Data Admissão', 'data_ult_renovacao_str': 'Renovado em:',
-                'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
+                'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
+                'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
                 'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
             })
             
             colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
             st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
-            
             st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
     else:
         st.info("ℹ️ Utilize os filtros acima para pesquisar e exibir os dados dos estagiários.")
-
 
 def page_cadastro():
     st.header("Gerenciar Estagiários")
@@ -383,25 +372,19 @@ def page_cadastro():
 
     if st.session_state.sub_menu_cad == "Novo":
         st.subheader("Cadastrar Novo Estagiário")
-        
+        # Formulário de novo estagiário (código inalterado)
         nome = st.text_input("Nome*", key="novo_nome").strip().upper()
-        
         universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...", key="novo_uni")
         universidade = universidade_selecionada
         if universidade_selecionada == "Outra (cadastrar manualmente)":
             universidade = st.text_input("Digite o nome da Universidade*", key="novo_uni_manual").strip().upper()
-
         c1, c2 = st.columns(2)
         data_adm = c1.date_input("Data de Admissão*", key="novo_data_adm")
-        
         termo_meses = meses_por_universidade(universidade if universidade else "")
         renov_disabled = (termo_meses >= 24)
-        
         data_renov = c2.date_input("Data da Última Renovação", value=None, disabled=renov_disabled, key="novo_data_renov")
         if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-        
         obs = st.text_area("Observações", key="novo_obs").strip().upper()
-        
         c_submit, c_cancel = st.columns(2)
         if c_submit.button("💾 Salvar Novo Estagiário", use_container_width=True, key="btn_salvar_novo"):
             if not nome or not universidade or not data_adm:
@@ -412,43 +395,33 @@ def page_cadastro():
                 st.session_state.message = {'text': f"Estagiário {nome} cadastrado!", 'type': 'success'}
                 st.session_state.sub_menu_cad = None
             st.rerun()
-            
         if c_cancel.button("Cancelar", use_container_width=True, key="btn_cancelar_novo"):
             st.session_state.sub_menu_cad = None
             st.rerun()
 
-    # <<< ALTERAÇÃO AQUI: Lógica de busca e edição com estado explícito >>>
+    # <<< ALTERAÇÃO AQUI: Nova lógica de busca e edição com estado explícito e seleção por radio >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
 
-        # Se um estagiário já foi selecionado para edição, mostra o formulário
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
-            
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
             with st.form("form_edit_cadastro"):
                 nome = st.text_input("Nome*", value=est_data_para_edicao["nome"]).strip().upper()
-                
                 uni_default = est_data_para_edicao.get("universidade")
                 uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
                 universidade = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index)
                 if universidade == "Outra (cadastrar manualmente)":
                     universidade = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "").strip().upper()
-
                 termo_meses = meses_por_universidade(universidade if universidade else "")
                 renov_disabled = (termo_meses >= 24)
-                
                 c1, c2 = st.columns(2)
                 data_adm = c1.date_input("Data de Admissão*", value=est_data_para_edicao["data_admissao"])
-                
                 valor_data_renov = est_data_para_edicao["data_ult_renovacao"]
                 if pd.isna(valor_data_renov): valor_data_renov = None
-
                 data_renov = c2.date_input("Data da Última Renovação", value=valor_data_renov, disabled=renov_disabled)
                 if renov_disabled: c2.info("Contrato único. Não requer renovação.")
-                
                 obs = st.text_area("Observações", value=est_data_para_edicao.get("obs", "")).strip().upper()
-                
                 c_save, c_delete, c_cancel = st.columns([2, 2, 1])
                 if c_save.form_submit_button("💾 Salvar Alterações", use_container_width=True):
                     if not nome or not universidade or not data_adm:
@@ -460,16 +433,13 @@ def page_cadastro():
                         st.session_state.sub_menu_cad = None
                         st.session_state.id_para_editar = None
                     st.rerun()
-
                 if c_delete.form_submit_button("🗑️ Excluir Estagiário", use_container_width=True):
                     st.session_state.confirm_delete_id = {'id': st.session_state.id_para_editar, 'nome': nome}
                     st.rerun()
-
                 if c_cancel.form_submit_button("Cancelar Edição", use_container_width=True):
                     st.session_state.id_para_editar = None
                     st.rerun()
-            
-            # Lógica de confirmação de exclusão
+
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
                 data_to_delete = st.session_state.confirm_delete_id
                 st.warning(f"Tem certeza que deseja excluir **{data_to_delete['nome']}**? Esta ação não pode ser desfeita.")
@@ -484,15 +454,12 @@ def page_cadastro():
                 if c2.button("NÃO, CANCELAR", key="cancel_del_btn"):
                     st.session_state.confirm_delete_id = None
                     st.rerun()
-        
-        # Se nenhum estagiário estiver selecionado, mostra a interface de busca
         else:
             if df_estagiarios.empty:
                 st.info("Nenhum estagiário para editar.")
                 return
 
             search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
-            
             if search_term.strip():
                 normalized_search = normalize_text(search_term.strip())
                 df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
@@ -501,41 +468,72 @@ def page_cadastro():
 
                 if df_results.empty:
                     st.warning("Nenhum estagiário encontrado com esse nome.")
-                
                 elif len(df_results) == 1:
                     st.success(f"Estagiário encontrado: {df_results.iloc[0]['nome']}. Carregando formulário de edição...")
                     st.session_state.id_para_editar = df_results.iloc[0]['id']
                     st.rerun()
-
                 else:
-                    st.info(f"{len(df_results)} estagiários encontrados. Por favor, selecione um da tabela abaixo para editar.")
+                    st.info(f"{len(df_results)} estagiários encontrados. Por favor, selecione um abaixo para editar.")
                     df_results['data_admissao_str'] = df_results['data_admissao'].dt.strftime('%d/%m/%Y')
-                    df_results['data_vencimento_str'] = df_results['data_vencimento'].dt.strftime('%d/%m/%Y')
-                    
-                    st.data_editor(
-                        df_results[['id', 'nome', 'universidade', 'data_admissao_str', 'data_vencimento_str']], 
-                        use_container_width=True, 
-                        hide_index=True,
-                        key="editor_selecao",
-                        disabled=df_results.columns
-                    )
+                    df_display_cols = ['id', 'nome', 'universidade', 'data_admissao_str']
+                    st.dataframe(df_results[df_display_cols], use_container_width=True, hide_index=True)
 
-                    if ('editor_selecao' in st.session_state and 
-                        'selection' in st.session_state.editor_selecao and 
-                        st.session_state.editor_selecao['selection']['rows']):
-                        selected_row_index = st.session_state.editor_selecao["selection"]["rows"][0]
-                        st.session_state.id_para_editar = df_results.iloc[selected_row_index]['id']
+                    # Mapeamento para o radio
+                    radio_options_map = {f"{row['nome']} (ID: {row['id']}, Admissão: {row['data_admissao_str']})": row['id'] for index, row in df_results.iterrows()}
+                    
+                    selected_option = st.radio("Selecione o estagiário:", options=radio_options_map.keys(), key="radio_selecao_estagiario")
+                    
+                    if st.button("Editar Selecionado", use_container_width=True):
+                        st.session_state.id_para_editar = radio_options_map[selected_option]
                         st.rerun()
 
+def page_base():
+    st.header("Base de Dados de Estagiários")
+    st.info("Abaixo está a lista completa de todos os estagiários cadastrados no sistema.")
+    
+    df = get_estagiarios_df()
+    if df.empty:
+        st.warning("Nenhum estagiário cadastrado para exibir.")
+        return
+        
+    # Formata o DataFrame para exibição (lógica similar ao dashboard)
+    proximos_dias_input = int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS))
+    df["status"] = df["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
+    df["proxima_renovacao"] = df.apply(calcular_proxima_renovacao, axis=1)
+    df["ultimo_ano"] = df["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
+    
+    regras_df = list_regras()
+    regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
+    df['data_ult_renovacao_str'] = ''
+    if regras_24m_keywords:
+        mask = (df['universidade'].str.upper().isin(regras_24m_keywords)) & (df['data_ult_renovacao'].isnull())
+        df.loc[mask, 'data_ult_renovacao_str'] = "Contrato Único"
+    
+    for col in ["data_admissao", "data_vencimento"]:
+        df[col] = df[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
+    
+    df['data_ult_renovacao_str'] = df.apply(
+        lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
+                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
+        axis=1)
+
+    df_display = df.rename(columns={
+        'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
+        'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
+        'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
+    })
+    
+    colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
+    st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
+    st.download_button("📥 Exportar Base Completa", exportar_para_excel_bytes(get_estagiarios_df()), "base_completa_estagiarios.xlsx", key="download_base")
 
 def page_regras():
+    # Código da page_regras (inalterado)
     st.header("Gerenciar Regras de Contrato")
     st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses). Universidades sem regra específica usarão o padrão de 6 meses.")
-    
     if 'message_rule' in st.session_state and st.session_state.message_rule:
         show_message(st.session_state.message_rule)
         st.session_state.message_rule = None
-    
     if 'rule_to_delete' in st.session_state and st.session_state.rule_to_delete:
         rule = st.session_state.rule_to_delete
         st.warning(f"Tem certeza que deseja excluir a regra para **{rule['keyword']}**?")
@@ -548,7 +546,6 @@ def page_regras():
         if c2.button("NÃO, CANCELAR"):
             st.session_state.rule_to_delete = None
             st.rerun()
-
     else:
         df_regras = list_regras()
         if df_regras.empty:
@@ -556,7 +553,6 @@ def page_regras():
         else:
             st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Duração (Meses)"}))
         st.divider()
-
         c1, c2 = st.columns(2)
         with c1:
             with st.form("form_add_edit_regra"):
@@ -564,14 +560,11 @@ def page_regras():
                 keyword_raw = st.selectbox("Universidade", options=universidades_padrao, index=None, placeholder="Selecione para adicionar ou editar...")
                 if keyword_raw == "Outra (cadastrar manualmente)":
                     keyword_raw = st.text_input("Digite o Nome ou Palavra-chave da Universidade")
-                
                 meses = st.number_input("Meses de contrato", min_value=1, max_value=24, value=6, step=1)
-                
                 if st.form_submit_button("Salvar Regra", use_container_width=True) and keyword_raw:
                     add_regra(keyword_raw, meses)
                     st.session_state.message_rule = {'text': f"Regra para '{keyword_raw}' salva!", 'type': 'success'}
                     st.rerun()
-
         with c2:
             with st.form("form_delete_regra"):
                 st.subheader("Excluir Regra")
@@ -585,36 +578,24 @@ def page_regras():
                     st.selectbox("Selecione a regra para excluir", [], disabled=True)
                     st.form_submit_button("🗑️ Excluir Regra Selecionada", disabled=True, use_container_width=True)
 
-
 def page_import_export():
+    # Código da page_import_export (inalterado)
     st.header("Importar e Exportar Dados")
-    
     c1, c2 = st.columns(2)
-
     with c1:
         st.subheader("📥 Exportar Todos os Dados")
         df_export = get_estagiarios_df()
-        st.download_button(
-            label="Baixar Planilha Completa (.xlsx)",
-            data=exportar_para_excel_bytes(df_export),
-            file_name="estagiarios_export_completo.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
-
+        st.download_button(label="Baixar Planilha Completa (.xlsx)", data=exportar_para_excel_bytes(df_export), file_name="estagiarios_export_completo.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
     with c2:
         st.subheader("📤 Importar de Arquivo Excel")
         st.info("Colunas obrigatórias: `nome`, `universidade`, `data_admissao`.")
-        
         with st.form("form_import"):
             arquivo = st.file_uploader("Selecione o arquivo Excel (.xlsx)", type=["xlsx"])
             submitted = st.form_submit_button("Iniciar Importação", use_container_width=True)
-
             if submitted and arquivo:
                 try:
                     df_import = pd.read_excel(arquivo)
                     required_cols = ['nome', 'universidade', 'data_admissao']
-                    
                     if not all(col in df_import.columns for col in required_cols):
                         st.error(f"O arquivo precisa ter as colunas obrigatórias: {', '.join(required_cols)}")
                     else:
@@ -639,13 +620,11 @@ def page_import_export():
             elif submitted and not arquivo:
                 st.warning("Por favor, selecione um arquivo para importar.")
 
-
 def page_admin():
+    # Código da page_admin (inalterado)
     st.header("🔑 Área Administrativa")
-    
     if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
     admin_password = get_config("admin_password")
-    
     if not st.session_state.admin_logged_in:
         with st.form("admin_login_form"):
             senha = st.text_input("Senha", type="password", label_visibility="collapsed", placeholder="Senha de Administrador")
@@ -656,40 +635,29 @@ def page_admin():
                 else:
                     st.error("Senha incorreta.")
         return
-
     st.success("Acesso de administrador liberado!")
-    
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("Backup do Banco de Dados")
         if os.path.exists(DB_FILE):
             with open(DB_FILE, "rb") as f: db_bytes = f.read()
             st.download_button(label="📥 Baixar Backup (.db)", data=db_bytes, file_name="backup_estagiarios.db", use_container_width=True)
-
     with c2:
         st.subheader("Logs do Sistema")
         col_f1, col_f2 = st.columns(2)
         start_date = col_f1.date_input("Data Início", value=None)
         end_date = col_f2.date_input("Data Fim", value=date.today())
-        
         logs_df = list_logs_df(start_date=start_date, end_date=end_date)
         if logs_df.empty:
             st.info("Nenhum log encontrado para o período selecionado.")
         else:
             st.dataframe(logs_df, use_container_width=True, hide_index=True)
-        
         log_bytes = exportar_logs_bytes(start_date=start_date, end_date=end_date)
-        st.download_button(
-            label="📥 Baixar Log do Período", data=log_bytes,
-            file_name=f"log_{start_date}_a_{end_date}.txt" if start_date and end_date else "log_periodo.txt",
-            mime="text/plain", use_container_width=True
-        )
-
+        st.download_button(label="📥 Baixar Log do Período", data=log_bytes, file_name=f"log_{start_date}_a_{end_date}.txt" if start_date and end_date else "log_periodo.txt", mime="text/plain", use_container_width=True)
     st.divider()
     if st.button("Sair da Área Admin", use_container_width=True):
         st.session_state.admin_logged_in = False
         st.rerun()
-
 
 # ==========================
 # Main App
@@ -704,21 +672,13 @@ def main():
     with c2:
         selected = option_menu(
             menu_title=None,
-            options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
-            icons=['bar-chart-line-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
+            options=["Dashboard", "Base", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
+            icons=['bar-chart-line-fill', 'database-fill', 'pencil-square', 'gear-fill', 'cloud-upload-fill', 'key-fill'],
             default_index=0, orientation="horizontal",
             styles={
                 "container": {"padding": "0!important", "background-color": "transparent"},
-                "nav-link": {
-                    "padding-bottom": "10px",
-                    "border-bottom": "3px solid transparent",
-                    "transition": "color 0.2s, border-bottom 0.2s",
-                },
-                "nav-link-selected": {
-                    "background-color": "transparent",
-                    "color": "var(--primary-color)",
-                    "border-bottom": "3px solid var(--primary-color)",
-                },
+                "nav-link": {"padding-bottom": "10px", "border-bottom": "3px solid transparent", "transition": "color 0.2s, border-bottom 0.2s"},
+                "nav-link-selected": {"background-color": "transparent", "color": "var(--primary-color)", "border-bottom": "3px solid var(--primary-color)"},
             }
         )
     st.divider()
@@ -733,6 +693,7 @@ def main():
 
     page_mapper = {
         "Dashboard": page_dashboard,
+        "Base": page_base,
         "Cadastro": page_cadastro,
         "Regras": page_regras,
         "Import/Export": page_import_export,
