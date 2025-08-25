@@ -14,7 +14,7 @@ import pytz
 # ==========================
 # Configurações e Constantes
 # ==========================
-DB_FILE = "estagiarios.db"
+DB_FILE = "H:\GUILHERME PITA\6.EstagiariosApp\estagiarios.db"
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
@@ -673,3 +673,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
