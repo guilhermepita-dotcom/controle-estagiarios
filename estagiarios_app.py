@@ -18,7 +18,8 @@ DB_FILE = "estagiarios.db"
 LOGO_FILE = "logo.png"
 DEFAULT_PROXIMOS_DIAS = 30
 DEFAULT_DURATION_OTHERS = 6
-DEFAULT_REGRAS = [("UERJ", 24), ("UNIRIO", 24), ("MACKENZIE", 24)]
+# ALTERAÇÃO: A lista de regras padrão agora está vazia.
+DEFAULT_REGRAS = []
 TIMEZONE = pytz.timezone("America/Sao_Paulo")
 
 universidades_padrao = [
@@ -263,7 +264,7 @@ def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
         df_export = df.copy()
         for col in ["data_admissao", "data_ult_renovacao", "data_vencimento"]:
             if col in df_export.columns:
-                 df_export[col] = pd.to_datetime(df_export[col]).dt.date
+                    df_export[col] = pd.to_datetime(df_export[col]).dt.date
         df_export.to_excel(writer, index=False, sheet_name='Estagiarios')
     return output.getvalue()
 
@@ -357,12 +358,10 @@ def page_cadastro():
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
 
-        # <<< ALTERAÇÃO AQUI: Lógica de edição totalmente refeita sem st.form >>>
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
 
-            # Flag para inicializar o estado do formulário apenas uma vez
             if 'current_edit_id' not in st.session_state or st.session_state.current_edit_id != st.session_state.id_para_editar:
                 st.session_state.edit_nome = est_data_para_edicao["nome"]
                 st.session_state.edit_universidade = est_data_para_edicao.get("universidade")
@@ -371,28 +370,30 @@ def page_cadastro():
                 st.session_state.edit_obs = est_data_para_edicao.get("obs", "")
                 st.session_state.current_edit_id = st.session_state.id_para_editar
 
-            # Renderiza os widgets usando o session_state
             st.text_input("Nome*", key="edit_nome")
             uni_default = st.session_state.edit_universidade
             uni_index = universidades_padrao.index(uni_default) if uni_default in universidades_padrao else None
             universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=uni_index, key="edit_universidade")
             
             universidade_final = universidade_selecionada
-            if universidade_selecionada == "Outra (cadastrar manualmente)":
+            if universidade_selecionada == "Outra (cadastrar manually)":
                 universidade_final = st.text_input("Digite o nome da Universidade*", value=uni_default if uni_default not in universidades_padrao else "", key="edit_universidade_manual").strip().upper()
             
             termo_meses = meses_por_universidade(universidade_final if universidade_final else "")
             renov_disabled = (termo_meses >= 24)
+            
+            # ===== INÍCIO DA CORREÇÃO =====
             c1, c2 = st.columns(2)
-            st.date_input("Data de Admissão*", key="edit_data_adm")
-            st.date_input("Data da Última Renovação", disabled=renov_disabled, key="edit_data_renov")
+            c1.date_input("Data de Admissão*", key="edit_data_adm")
+            c2.date_input("Data da Última Renovação", disabled=renov_disabled, key="edit_data_renov")
             if renov_disabled: c2.info("Contrato único. Não requer renovação.")
+            # ===== FIM DA CORREÇÃO =====
+
             st.text_area("Observações", key="edit_obs")
             
             c_save, c_delete, c_cancel = st.columns([2, 2, 1])
 
             if c_save.button("💾 Salvar Alterações", use_container_width=True):
-                # Lê os valores mais recentes diretamente do session_state
                 nome_edit = st.session_state.edit_nome.strip().upper()
                 uni_edit = st.session_state.edit_universidade if st.session_state.edit_universidade != "Outra (cadastrar manualmente)" else st.session_state.edit_universidade_manual.strip().upper()
                 data_adm_edit = st.session_state.edit_data_adm
@@ -407,7 +408,6 @@ def page_cadastro():
                     update_estagiario(st.session_state.id_para_editar, nome_edit, uni_edit, data_adm_edit, data_renov_edit if not renov_disabled else None, obs_edit, data_venc)
                     st.session_state.message = {'text': f"Dados de {nome_edit} atualizados!", 'type': 'success'}
                     
-                    # Limpa o estado
                     st.session_state.sub_menu_cad = None
                     st.session_state.id_para_editar = None
                     st.session_state.current_edit_id = None
