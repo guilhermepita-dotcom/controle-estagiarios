@@ -313,7 +313,6 @@ def page_dashboard():
     filtro_status = filtros_c1.multiselect("Filtrar por status", options=["OK", "Venc.Proximo", "Vencido"])
     filtro_nome = filtros_c2.text_input("🔎 Buscar por Nome do Estagiário")
 
-    # <<< ALTERAÇÃO AQUI: A tabela só aparece se houver filtro >>>
     if filtro_status or filtro_nome.strip():
         df_view = df.copy()
         if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
@@ -399,17 +398,26 @@ def page_cadastro():
                 st.session_state.sub_menu_cad = None
                 st.rerun()
 
+    # <<< ALTERAÇÃO AQUI: Lógica de busca no lugar da lista completa >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
         if df_estagiarios.empty:
             st.info("Nenhum estagiário para editar.")
             return
 
-        nomes_estagiarios = {row['nome']: row['id'] for _, row in df_estagiarios.iterrows()}
-        nome_selecionado = st.selectbox("Selecione um estagiário para editar", options=nomes_estagiarios.keys(), index=None)
-
+        search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
+        
+        nome_selecionado = None
+        if search_term.strip():
+            df_results = df_estagiarios[df_estagiarios["nome"].str.contains(search_term.strip(), case=False, na=False)]
+            if not df_results.empty:
+                nomes_encontrados = df_results["nome"].tolist()
+                nome_selecionado = st.selectbox("Selecione o estagiário encontrado", options=nomes_encontrados, index=None, placeholder="Clique para selecionar...")
+            else:
+                st.warning("Nenhum estagiário encontrado com esse nome.")
+        
         if nome_selecionado:
-            id_selecionado = nomes_estagiarios[nome_selecionado]
+            id_selecionado = df_estagiarios[df_estagiarios["nome"] == nome_selecionado].iloc[0]['id']
             est_data = df_estagiarios[df_estagiarios['id'] == id_selecionado].iloc[0]
 
             with st.form("form_edit_cadastro"):
@@ -510,7 +518,6 @@ def page_regras():
 def page_import_export():
     st.header("Importar e Exportar Dados")
     
-    # <<< ALTERAÇÃO AQUI: Melhoria no fluxo de importação >>>
     c1, c2 = st.columns(2)
 
     with c1:
@@ -624,6 +631,7 @@ def main():
     if os.path.exists(LOGO_FILE): c1.image(LOGO_FILE, width=150)
     
     with c2:
+        # <<< ALTERAÇÃO AQUI: Adição da barra inferior no estilo do menu >>>
         selected = option_menu(
             menu_title=None,
             options=["Dashboard", "Cadastro", "Regras", "Import/Export", "Área Administrativa"],
@@ -631,7 +639,16 @@ def main():
             default_index=0, orientation="horizontal",
             styles={
                 "container": {"padding": "0!important", "background-color": "transparent"},
-                "nav-link-selected": {"background-color": "transparent", "color": "var(--primary-color)"},
+                "nav-link": {
+                    "padding-bottom": "10px",
+                    "border-bottom": "3px solid transparent",
+                    "transition": "color 0.2s, border-bottom 0.2s",
+                },
+                "nav-link-selected": {
+                    "background-color": "transparent",
+                    "color": "var(--primary-color)",
+                    "border-bottom": "3px solid var(--primary-color)",
+                },
             }
         )
     st.divider()
