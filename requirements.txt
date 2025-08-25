@@ -6,3 +6,5 @@ openpyxl
 streamlit-option-menu
 pytz
 libsql-client
+nest_asyncio
+
