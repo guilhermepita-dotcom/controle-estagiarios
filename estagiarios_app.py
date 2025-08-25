@@ -131,12 +131,10 @@ def init_db():
             action TEXT NOT NULL, details TEXT
         )
     """)
-    
     if not c.execute("SELECT 1 FROM config WHERE key='regras_iniciadas'").fetchone():
         for kw, meses in DEFAULT_REGRAS:
             c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
         c.execute("INSERT INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
-
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
     c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
     conn.commit()
@@ -221,21 +219,16 @@ def meses_por_universidade(universidade: str) -> int:
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
     return data_adm + relativedelta(months=24) if data_adm else None
 
-def classificar_status(data_venc: Optional[datetime], proximos_dias: int) -> str:
-    if pd.isna(data_venc): return "SEM DATA"
-    delta = (data_venc.date() - date.today()).days
-    if delta < 0: return "Vencido"
-    if delta <= proximos_dias: return "Venc.Proximo"
-    return "OK"
-
 def calcular_proxima_renovacao(row: pd.Series) -> str:
     hoje = date.today()
     data_adm = row['data_admissao'].date() if pd.notna(row['data_admissao']) else None
     data_ult_renov = row.get('data_ult_renovacao', pd.NaT).date() if pd.notna(row.get('data_ult_renovacao')) else None
     
     if not data_adm: return ""
+
     termo_meses = meses_por_universidade(row['universidade'])
-    if termo_meses >= 24: return ""
+    # <<< ALTERAÇÃO AQUI: Retorna "Contrato único" para regras de 24 meses >>>
+    if termo_meses >= 24: return "Contrato único"
     
     limite_2_anos = data_adm + relativedelta(months=24)
     if limite_2_anos < hoje: return "Contrato Encerrado"
@@ -246,6 +239,72 @@ def calcular_proxima_renovacao(row: pd.Series) -> str:
     if proxima_data_renovacao > limite_2_anos: return "Término do Contrato"
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
+
+# <<< ALTERAÇÃO AQUI: Função de Status foi movida para uma função de processamento central >>>
+def processar_df_para_exibicao(df: pd.DataFrame) -> pd.DataFrame:
+    """Função central que calcula todas as colunas dinâmicas para exibição."""
+    if df.empty:
+        return df
+    
+    df_proc = df.copy()
+    proximos_dias = int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS))
+    
+    # 1. Calcular Próxima Renovação
+    df_proc['proxima_renovacao'] = df_proc.apply(calcular_proxima_renovacao, axis=1)
+
+    # 2. Nova Lógica de Status
+    def determinar_status(row):
+        # Caso especial: se a renovação está pendente, o status é Vencido.
+        if row['proxima_renovacao'] == "Renovação Pendente":
+            return "Vencido"
+        
+        # Tenta usar a data de próxima renovação como data alvo
+        data_alvo = pd.to_datetime(row['proxima_renovacao'], format='%d.%m.%Y', errors='coerce')
+        
+        # Se não for uma data válida (ex: "Contrato único"), usa a data de término do contrato
+        if pd.isna(data_alvo):
+            data_alvo = row['data_vencimento']
+            
+        # Se ainda assim não houver data, retorna status indefinido
+        if pd.isna(data_alvo):
+            return "SEM DATA"
+            
+        # Compara a data alvo com a data atual
+        delta = (data_alvo.date() - date.today()).days
+        if delta < 0: return "Vencido"
+        if delta <= proximos_dias: return "Venc.Proximo"
+        return "OK"
+        
+    df_proc['status'] = df_proc.apply(determinar_status, axis=1)
+
+    # 3. Calcular Ultimo Ano
+    df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
+
+    # 4. Formatar "Renovado em"
+    regras_df = list_regras()
+    regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
+    df_proc['data_ult_renovacao_str'] = ''
+    if regras_24m_keywords:
+        mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
+        df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
+    
+    df_proc['data_ult_renovacao_str'] = df_proc.apply(
+        lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
+                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
+        axis=1)
+
+    # 5. Formatar colunas de data para exibição
+    for col in ["data_admissao", "data_vencimento"]:
+        df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
+
+    # 6. Renomear colunas
+    df_proc = df_proc.rename(columns={
+        'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
+        'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
+        'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
+    })
+    
+    return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
     query = "SELECT timestamp, action, details FROM logs"
@@ -296,17 +355,19 @@ def page_dashboard():
     if str(proximos_dias_input) != get_config("proximos_dias"):
         set_config("proximos_dias", str(proximos_dias_input))
 
-    df = get_estagiarios_df()
-    if df.empty:
+    df_raw = get_estagiarios_df()
+    if df_raw.empty:
         st.info("Nenhum estagiário cadastrado ainda.")
         return
 
-    df["status"] = df["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
+    # Processa os dados para exibição
+    df_display = processar_df_para_exibicao(df_raw)
+
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("👥 Total de Estagiários", len(df))
-    c2.metric("✅ Contratos OK", (df["status"] == "OK").sum())
-    c3.metric("⚠️ Vencimentos Próximos", (df["status"] == "Venc.Proximo").sum())
-    c4.metric("⛔ Contratos Vencidos", (df["status"] == "Vencido").sum())
+    c1.metric("👥 Total de Estagiários", len(df_display))
+    c2.metric("✅ Contratos OK", (df_display["Status"] == "OK").sum())
+    c3.metric("⚠️ Vencimentos Próximos", (df_display["Status"] == "Venc.Proximo").sum())
+    c4.metric("⛔ Contratos Vencidos", (df_display["Status"] == "Vencido").sum())
     st.divider()
 
     filtros_c1, filtros_c2 = st.columns(2)
@@ -314,41 +375,18 @@ def page_dashboard():
     filtro_nome = filtros_c2.text_input("🔎 Buscar por Nome do Estagiário")
 
     if filtro_status or filtro_nome.strip():
-        df_view = df.copy()
-        if filtro_status: df_view = df_view[df_view["status"].isin(filtro_status)]
-        if filtro_nome.strip(): df_view = df_view[df_view["nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
+        df_view = df_display.copy()
+        if filtro_status: df_view = df_view[df_view["Status"].isin(filtro_status)]
+        if filtro_nome.strip(): df_view = df_view[df_view["Nome"].str.contains(filtro_nome.strip(), case=False, na=False)]
 
         if df_view.empty:
             st.warning("Nenhum registro encontrado para os filtros selecionados.")
         else:
-            df_display = df_view.copy()
-            df_display["proxima_renovacao"] = df_display.apply(calcular_proxima_renovacao, axis=1)
-            df_display["ultimo_ano"] = df_display["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
-            
-            regras_df = list_regras()
-            regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
-            df_display['data_ult_renovacao_str'] = ''
-            if regras_24m_keywords:
-                mask = (df_display['universidade'].str.upper().isin(regras_24m_keywords)) & (df_display['data_ult_renovacao'].isnull())
-                df_display.loc[mask, 'data_ult_renovacao_str'] = "Contrato Único"
-            
-            for col in ["data_admissao", "data_vencimento"]:
-                df_display[col] = df_display[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
-            
-            df_display['data_ult_renovacao_str'] = df_display.apply(
-                lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
-                            row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
-                axis=1)
-
-            df_display = df_display.rename(columns={
-                'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
-                'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
-                'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
-            })
-            
             colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
-            st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
-            st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_view), "estagiarios_filtrados.xlsx", key="download_dashboard")
+            st.dataframe(df_view[colunas_ordenadas], use_container_width=True, hide_index=True)
+            # Para exportar, usamos os dados brutos filtrados
+            df_export_raw = df_raw[df_raw['id'].isin(df_view['ID'])]
+            st.download_button("📥 Exportar Resultado", exportar_para_excel_bytes(df_export_raw), "estagiarios_filtrados.xlsx", key="download_dashboard")
     else:
         st.info("ℹ️ Utilize os filtros acima para pesquisar e exibir os dados dos estagiários.")
 
@@ -372,7 +410,6 @@ def page_cadastro():
 
     if st.session_state.sub_menu_cad == "Novo":
         st.subheader("Cadastrar Novo Estagiário")
-        # Formulário de novo estagiário (código inalterado)
         nome = st.text_input("Nome*", key="novo_nome").strip().upper()
         universidade_selecionada = st.selectbox("Universidade*", options=universidades_padrao, index=None, placeholder="Selecione uma universidade...", key="novo_uni")
         universidade = universidade_selecionada
@@ -399,10 +436,8 @@ def page_cadastro():
             st.session_state.sub_menu_cad = None
             st.rerun()
 
-    # <<< ALTERAÇÃO AQUI: Nova lógica de busca e edição com estado explícito e seleção por radio >>>
     if st.session_state.sub_menu_cad == "Editar":
         df_estagiarios = get_estagiarios_df()
-
         if 'id_para_editar' in st.session_state and st.session_state.id_para_editar:
             est_data_para_edicao = df_estagiarios[df_estagiarios['id'] == st.session_state.id_para_editar].iloc[0]
             st.subheader(f"Editando: {est_data_para_edicao['nome']}")
@@ -439,7 +474,6 @@ def page_cadastro():
                 if c_cancel.form_submit_button("Cancelar Edição", use_container_width=True):
                     st.session_state.id_para_editar = None
                     st.rerun()
-
             if 'confirm_delete_id' in st.session_state and st.session_state.confirm_delete_id:
                 data_to_delete = st.session_state.confirm_delete_id
                 st.warning(f"Tem certeza que deseja excluir **{data_to_delete['nome']}**? Esta ação não pode ser desfeita.")
@@ -458,14 +492,12 @@ def page_cadastro():
             if df_estagiarios.empty:
                 st.info("Nenhum estagiário para editar.")
                 return
-
             search_term = st.text_input("🔎 Digite o nome do estagiário para buscar", placeholder="Ex: João da Silva")
             if search_term.strip():
                 normalized_search = normalize_text(search_term.strip())
                 df_estagiarios['nome_normalizado'] = df_estagiarios['nome'].apply(normalize_text)
                 df_results = df_estagiarios[df_estagiarios['nome_normalizado'].str.contains(normalized_search, na=False)].copy()
                 df_results.reset_index(drop=True, inplace=True)
-
                 if df_results.empty:
                     st.warning("Nenhum estagiário encontrado com esse nome.")
                 elif len(df_results) == 1:
@@ -477,12 +509,8 @@ def page_cadastro():
                     df_results['data_admissao_str'] = df_results['data_admissao'].dt.strftime('%d/%m/%Y')
                     df_display_cols = ['id', 'nome', 'universidade', 'data_admissao_str']
                     st.dataframe(df_results[df_display_cols], use_container_width=True, hide_index=True)
-
-                    # Mapeamento para o radio
                     radio_options_map = {f"{row['nome']} (ID: {row['id']}, Admissão: {row['data_admissao_str']})": row['id'] for index, row in df_results.iterrows()}
-                    
                     selected_option = st.radio("Selecione o estagiário:", options=radio_options_map.keys(), key="radio_selecao_estagiario")
-                    
                     if st.button("Editar Selecionado", use_container_width=True):
                         st.session_state.id_para_editar = radio_options_map[selected_option]
                         st.rerun()
@@ -490,45 +518,16 @@ def page_cadastro():
 def page_base():
     st.header("Base de Dados de Estagiários")
     st.info("Abaixo está a lista completa de todos os estagiários cadastrados no sistema.")
-    
-    df = get_estagiarios_df()
-    if df.empty:
+    df_raw = get_estagiarios_df()
+    if df_raw.empty:
         st.warning("Nenhum estagiário cadastrado para exibir.")
         return
-        
-    # Formata o DataFrame para exibição (lógica similar ao dashboard)
-    proximos_dias_input = int(get_config("proximos_dias", DEFAULT_PROXIMOS_DIAS))
-    df["status"] = df["data_vencimento"].apply(lambda d: classificar_status(d, proximos_dias_input))
-    df["proxima_renovacao"] = df.apply(calcular_proxima_renovacao, axis=1)
-    df["ultimo_ano"] = df["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
-    
-    regras_df = list_regras()
-    regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
-    df['data_ult_renovacao_str'] = ''
-    if regras_24m_keywords:
-        mask = (df['universidade'].str.upper().isin(regras_24m_keywords)) & (df['data_ult_renovacao'].isnull())
-        df.loc[mask, 'data_ult_renovacao_str'] = "Contrato Único"
-    
-    for col in ["data_admissao", "data_vencimento"]:
-        df[col] = df[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
-    
-    df['data_ult_renovacao_str'] = df.apply(
-        lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
-                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
-        axis=1)
-
-    df_display = df.rename(columns={
-        'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
-        'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
-        'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
-    })
-    
+    df_display = processar_df_para_exibicao(df_raw)
     colunas_ordenadas = ['ID', 'Nome', 'Universidade', 'Data Admissão', 'Renovado em:', 'Status', 'Ultimo Ano?', 'Proxima Renovação', 'Termino de Contrato', 'Observação']
     st.dataframe(df_display[colunas_ordenadas], use_container_width=True, hide_index=True)
     st.download_button("📥 Exportar Base Completa", exportar_para_excel_bytes(get_estagiarios_df()), "base_completa_estagiarios.xlsx", key="download_base")
 
 def page_regras():
-    # Código da page_regras (inalterado)
     st.header("Gerenciar Regras de Contrato")
     st.info("Defina o tempo máximo de contrato para cada universidade (não pode exceder 24 meses). Universidades sem regra específica usarão o padrão de 6 meses.")
     if 'message_rule' in st.session_state and st.session_state.message_rule:
@@ -548,10 +547,8 @@ def page_regras():
             st.rerun()
     else:
         df_regras = list_regras()
-        if df_regras.empty:
-            st.info("Nenhuma regra personalizada cadastrada.")
-        else:
-            st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Duração (Meses)"}))
+        if df_regras.empty: st.info("Nenhuma regra personalizada cadastrada.")
+        else: st.table(df_regras.rename(columns={"keyword": "Universidade", "meses": "Duração (Meses)"}))
         st.divider()
         c1, c2 = st.columns(2)
         with c1:
@@ -579,7 +576,6 @@ def page_regras():
                     st.form_submit_button("🗑️ Excluir Regra Selecionada", disabled=True, use_container_width=True)
 
 def page_import_export():
-    # Código da page_import_export (inalterado)
     st.header("Importar e Exportar Dados")
     c1, c2 = st.columns(2)
     with c1:
@@ -621,7 +617,6 @@ def page_import_export():
                 st.warning("Por favor, selecione um arquivo para importar.")
 
 def page_admin():
-    # Código da page_admin (inalterado)
     st.header("🔑 Área Administrativa")
     if 'admin_logged_in' not in st.session_state: st.session_state.admin_logged_in = False
     admin_password = get_config("admin_password")
@@ -648,10 +643,8 @@ def page_admin():
         start_date = col_f1.date_input("Data Início", value=None)
         end_date = col_f2.date_input("Data Fim", value=date.today())
         logs_df = list_logs_df(start_date=start_date, end_date=end_date)
-        if logs_df.empty:
-            st.info("Nenhum log encontrado para o período selecionado.")
-        else:
-            st.dataframe(logs_df, use_container_width=True, hide_index=True)
+        if logs_df.empty: st.info("Nenhum log encontrado para o período selecionado.")
+        else: st.dataframe(logs_df, use_container_width=True, hide_index=True)
         log_bytes = exportar_logs_bytes(start_date=start_date, end_date=end_date)
         st.download_button(label="📥 Baixar Log do Período", data=log_bytes, file_name=f"log_{start_date}_a_{end_date}.txt" if start_date and end_date else "log_periodo.txt", mime="text/plain", use_container_width=True)
     st.divider()
@@ -665,10 +658,8 @@ def page_admin():
 def main():
     load_custom_css()
     init_db()
-
     c1, c2 = st.columns([1, 4], vertical_alignment="center")
     if os.path.exists(LOGO_FILE): c1.image(LOGO_FILE, width=150)
-    
     with c2:
         selected = option_menu(
             menu_title=None,
@@ -679,10 +670,8 @@ def main():
                 "container": {"padding": "0!important", "background-color": "transparent"},
                 "nav-link": {"padding-bottom": "10px", "border-bottom": "3px solid transparent", "transition": "color 0.2s, border-bottom 0.2s"},
                 "nav-link-selected": {"background-color": "transparent", "color": "var(--primary-color)", "border-bottom": "3px solid var(--primary-color)"},
-            }
-        )
+            })
     st.divider()
-    
     if 'main_selection' not in st.session_state or selected != st.session_state.main_selection:
         st.session_state.main_selection = selected
         keys_to_reset = ['sub_menu_cad', 'confirm_delete_id', 'rule_to_delete', 'id_para_editar']
@@ -690,16 +679,10 @@ def main():
             if key in st.session_state:
                 st.session_state[key] = None
         st.rerun()
-
     page_mapper = {
-        "Dashboard": page_dashboard,
-        "Base": page_base,
-        "Cadastro": page_cadastro,
-        "Regras": page_regras,
-        "Import/Export": page_import_export,
-        "Área Administrativa": page_admin
+        "Dashboard": page_dashboard, "Base": page_base, "Cadastro": page_cadastro,
+        "Regras": page_regras, "Import/Export": page_import_export, "Área Administrativa": page_admin
     }
-    
     if selected in page_mapper:
         page_mapper[selected]()
 
