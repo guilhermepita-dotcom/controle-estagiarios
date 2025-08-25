@@ -400,6 +400,13 @@ def page_cadastro():
                 data_renov_edit = st.session_state.edit_data_renov
                 obs_edit = st.session_state.edit_obs.strip().upper()
 
+                st.write("--- DADOS DE TESTE ---")
+                st.write(f"ID para atualizar: {st.session_state.id_para_editar}")
+                st.write(f"Novo Nome: {nome_edit}")
+                st.write(f"Nova Universidade: {uni_edit}")
+                st.write(f"Nova Data de Admissão: {data_adm_edit}")
+                st.write("--------------------")
+
                 if not nome_edit or not uni_edit or not data_adm_edit:
                     st.session_state.message = {'text': "Preencha todos os campos obrigatórios (*).", 'type': 'warning'}
                     st.rerun()
@@ -638,3 +645,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
