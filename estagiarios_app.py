@@ -80,27 +80,14 @@ def load_custom_css():
                 --secondary-background-color: #212121; --text-color: #FFFFFF;
                 --text-color-dark: #0F0F0F; --font-family: 'Poppins', sans-serif;
             }
-            html, body, [class*="st-"], .st-emotion-cache-10trblm {
-                font-family: var(--font-family); color: var(--text-color);
-            }
+            html, body, [class*="st-"], .st-emotion-cache-10trblm { font-family: var(--font-family); color: var(--text-color); }
             .main > div { background-color: var(--background-color); }
             h1, h2, h3 { color: var(--text-color) !important; font-weight: 600 !important;}
-            .stButton > button {
-                background-color: transparent; color: var(--primary-color);
-                border-radius: 8px; border: 2px solid var(--primary-color);
-                font-weight: 600; transition: all 0.2s ease-in-out; padding: 8px 16px;
-            }
+            .stButton > button { background-color: transparent; color: var(--primary-color); border-radius: 8px; border: 2px solid var(--primary-color); font-weight: 600; transition: all 0.2s ease-in-out; padding: 8px 16px; }
             .stButton > button:hover { background-color: var(--primary-color); color: #FFFFFF; }
             .stButton > button:focus { box-shadow: 0 0 0 2px var(--secondary-background-color), 0 0 0 4px var(--primary-color) !important; }
-            [data-testid="stMetric"] {
-                background-color: rgba(33, 33, 33, 0.3); border-radius: 10px;
-                padding: 20px; border-left: 5px solid var(--primary-color);
-                box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2);
-            }
-            div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column;"] > div[data-testid="stForm"] {
-                background-color: var(--secondary-background-color); border-radius: 10px;
-                padding: 25px; border: 1px solid #333;
-            }
+            [data-testid="stMetric"] { background-color: rgba(33, 33, 33, 0.3); border-radius: 10px; padding: 20px; border-left: 5px solid var(--primary-color); box-shadow: 0 4px 8px 0 rgba(0,0,0,0.2); }
+            div[data-testid="stVerticalBlock"] > div[style*="flex-direction: column;"] > div[data-testid="stForm"] { background-color: var(--secondary-background-color); border-radius: 10px; padding: 25px; border: 1px solid #333; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -108,144 +95,128 @@ def load_custom_css():
 # Banco de Dados
 # ==========================
 @st.cache_resource
-def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+def get_read_connection():
+    """Conexão em cache apenas para leitura de dados."""
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False, uri=True, isolation_level=None)
     conn.row_factory = sqlite3.Row
     return conn
 
+def execute_write_query(query: str, params: tuple = ()):
+    """Função segura para todas as operações de escrita (INSERT, UPDATE, DELETE)."""
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute(query, params)
+        conn.commit()
+    st.cache_resource.clear()
+
 def init_db():
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("""
+    # Usa a função de escrita para garantir a criação das tabelas
+    execute_write_query("""
         CREATE TABLE IF NOT EXISTS estagiarios (
             id INTEGER PRIMARY KEY, nome TEXT NOT NULL, universidade TEXT NOT NULL,
             data_admissao TEXT NOT NULL, data_ult_renovacao TEXT,
             obs TEXT, data_vencimento TEXT
         )
     """)
-    c.execute("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
-    c.execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
-    c.execute("""
+    execute_write_query("CREATE TABLE IF NOT EXISTS regras (id INTEGER PRIMARY KEY, keyword TEXT UNIQUE NOT NULL, meses INTEGER NOT NULL)")
+    execute_write_query("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+    execute_write_query("""
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
             action TEXT NOT NULL, details TEXT
         )
     """)
-    if not c.execute("SELECT 1 FROM config WHERE key='regras_iniciadas'").fetchone():
+    if not get_config('regras_iniciadas'):
         for kw, meses in DEFAULT_REGRAS:
-            c.execute("INSERT OR IGNORE INTO regras(keyword, meses) VALUES (?, ?)", (kw.upper(), meses))
-        c.execute("INSERT INTO config(key, value) VALUES(?, ?)", ('regras_iniciadas', 'true'))
-    c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('proximos_dias', str(DEFAULT_PROXIMOS_DIAS)))
-    c.execute("INSERT OR IGNORE INTO config(key, value) VALUES(?, ?)", ('admin_password', '123456'))
-    conn.commit()
+            add_regra(kw.upper(), meses)
+        set_config('regras_iniciadas', 'true')
+    
+    if not get_config('proximos_dias'):
+        set_config('proximos_dias', str(DEFAULT_PROXIMOS_DIAS))
+    if not get_config('admin_password'):
+        set_config('admin_password', '123456')
 
 def get_config(key: str, default: Optional[str] = None) -> str:
-    row = get_db_connection().execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
+    row = get_read_connection().execute("SELECT value FROM config WHERE key=?", (key,)).fetchone()
     return row['value'] if row else (default if default is not None else "")
 
 def set_config(key: str, value: str):
-    conn = get_db_connection()
-    conn.execute("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    execute_write_query("INSERT OR REPLACE INTO config(key, value) VALUES(?, ?)", (key, value))
 
 # ==========================
 # Funções de Lógica e CRUD
 # ==========================
-def normalize_text(text: str) -> str:
-    if not isinstance(text, str): return ""
-    return "".join(c for c in unicodedata.normalize('NFD', text.lower()) if unicodedata.category(c) != 'Mn')
-
 def log_action(action: str, details: str = ""):
-    conn = get_db_connection()
     timestamp = datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
-    conn.execute("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    execute_write_query("INSERT INTO logs (timestamp, action, details) VALUES (?, ?, ?)", (timestamp, action, details))
 
 def list_regras() -> pd.DataFrame:
-    return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_db_connection())
+    return pd.read_sql_query("SELECT id, keyword, meses FROM regras ORDER BY keyword", get_read_connection())
 
 def add_regra(keyword: str, meses: int):
-    conn = get_db_connection()
-    conn.execute("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    execute_write_query("INSERT OR REPLACE INTO regras(keyword, meses) VALUES (?, ?)", (keyword.upper().strip(), meses))
     log_action("REGRA ADICIONADA/EDITADA", f"Universidade: {keyword}, Meses: {meses}")
 
 def delete_regra(regra_id: int, keyword: str):
-    conn = get_db_connection()
-    conn.execute("DELETE FROM regras WHERE id=?", (int(regra_id),))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    execute_write_query("DELETE FROM regras WHERE id=?", (int(regra_id),))
     log_action("REGRA EXCLUÍDA", f"ID: {regra_id}, Universidade: {keyword}")
 
 def get_estagiarios_df() -> pd.DataFrame:
     try:
-        df = pd.read_sql_query("SELECT * FROM estagiarios", get_db_connection(), index_col="id")
+        df = pd.read_sql_query("SELECT * FROM estagiarios", get_read_connection(), index_col="id")
     except (pd.io.sql.DatabaseError, ValueError):
         return pd.DataFrame()
     if df.empty: return df
-    
     for col in ['data_admissao', 'data_ult_renovacao', 'data_vencimento']:
         df[col] = pd.to_datetime(df[col], errors='coerce')
-
     df = df.sort_values(by='data_vencimento', ascending=True)
     df.reset_index(inplace=True)
     return df
 
 def insert_estagiario(nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    conn = get_db_connection()
-    conn.execute("INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)",
-                 (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    query = "INSERT INTO estagiarios(nome, universidade, data_admissao, data_ult_renovacao, obs, data_vencimento) VALUES (?, ?, ?, ?, ?, ?)"
+    params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None)
+    execute_write_query(query, params)
     log_action("NOVO ESTAGIÁRIO", f"Nome: {nome}, Universidade: {universidade}")
 
 def update_estagiario(est_id: int, nome: str, universidade: str, data_adm: date, data_renov: Optional[date], obs: str, data_venc: Optional[date]):
-    conn = get_db_connection()
-    conn.execute("UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?",
-                 (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    query = "UPDATE estagiarios SET nome=?, universidade=?, data_admissao=?, data_ult_renovacao=?, obs=?, data_vencimento=? WHERE id=?"
+    params = (nome, universidade, str(data_adm), str(data_renov) if data_renov else None, obs, str(data_venc) if data_venc else None, est_id)
+    execute_write_query(query, params)
     log_action("ESTAGIÁRIO ATUALIZADO", f"ID: {est_id}, Nome: {nome}")
 
 def delete_estagiario(est_id: int, nome: str):
-    conn = get_db_connection()
-    conn.execute("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
-    conn.commit()
-    st.cache_resource.clear() # <<< CORREÇÃO AQUI
+    execute_write_query("DELETE FROM estagiarios WHERE id=?", (int(est_id),))
     log_action("ESTAGIÁRIO EXCLUÍDO", f"ID: {est_id}, Nome: {nome}")
 
 def meses_por_universidade(universidade: str) -> int:
+    # Função inalterada
     if not universidade: return DEFAULT_DURATION_OTHERS
     df_regras = list_regras()
     regras_dict = {row["keyword"]: int(row["meses"]) for _, row in df_regras.iterrows()}
     return regras_dict.get(universidade.upper(), DEFAULT_DURATION_OTHERS)
 
 def calcular_vencimento_final(data_adm: Optional[date]) -> Optional[date]:
+    # Função inalterada
     return data_adm + relativedelta(months=24) if data_adm else None
 
 def calcular_proxima_renovacao(row: pd.Series) -> str:
+    # Função inalterada
     hoje = date.today()
     data_adm = row['data_admissao'].date() if pd.notna(row['data_admissao']) else None
     data_ult_renov = row.get('data_ult_renovacao', pd.NaT).date() if pd.notna(row.get('data_ult_renovacao')) else None
-    
     if not data_adm: return ""
     termo_meses = meses_por_universidade(row['universidade'])
     if termo_meses >= 24: return "Contrato único"
-    
     limite_2_anos = data_adm + relativedelta(months=24)
     if limite_2_anos < hoje: return "Contrato Encerrado"
-    
     base_date = data_ult_renov if data_ult_renov else data_adm
     proxima_data_renovacao = base_date + relativedelta(months=6)
-
     if proxima_data_renovacao > limite_2_anos: return "Término do Contrato"
     if proxima_data_renovacao < hoje: return "Renovação Pendente"
     return proxima_data_renovacao.strftime("%d.%m.%Y")
 
 def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
+    # Função inalterada
     if row['proxima_renovacao'] == "Renovação Pendente": return "Vencido"
     data_alvo = pd.to_datetime(row['proxima_renovacao'], format='%d.%m.%Y', errors='coerce')
     if pd.isna(data_alvo): data_alvo = row['data_vencimento']
@@ -256,54 +227,46 @@ def _determinar_status(row: pd.Series, proximos_dias: int) -> str:
     return "OK"
 
 def processar_df_para_exibicao(df: pd.DataFrame, proximos_dias: int) -> pd.DataFrame:
+    # Função inalterada
     if df.empty: return df
     df_proc = df.copy()
     df_proc['proxima_renovacao'] = df_proc.apply(calcular_proxima_renovacao, axis=1)
     df_proc['status'] = df_proc.apply(_determinar_status, axis=1, args=(proximos_dias,))
     df_proc["ultimo_ano"] = df_proc["data_vencimento"].dt.year.apply(lambda y: "SIM" if pd.notna(y) and y == date.today().year else "NÃO")
-
     regras_df = list_regras()
     regras_24m_keywords = [row['keyword'] for _, row in regras_df.iterrows() if row['meses'] >= 24]
     df_proc['data_ult_renovacao_str'] = ''
     if regras_24m_keywords:
         mask = (df_proc['universidade'].str.upper().isin(regras_24m_keywords)) & (df_proc['data_ult_renovacao'].isnull())
         df_proc.loc[mask, 'data_ult_renovacao_str'] = "Contrato único"
-    
-    df_proc['data_ult_renovacao_str'] = df_proc.apply(
-        lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else
-                    row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '',
-        axis=1)
-
+    df_proc['data_ult_renovacao_str'] = df_proc.apply(lambda row: row['data_ult_renovacao_str'] if row['data_ult_renovacao_str'] else row['data_ult_renovacao'].strftime('%d.%m.%Y') if pd.notna(row['data_ult_renovacao']) else '', axis=1)
     for col in ["data_admissao", "data_vencimento"]:
         df_proc[col] = df_proc[col].dt.strftime('%d.%m.%Y').replace('NaT', '')
-
     df_proc = df_proc.rename(columns={
         'id': 'ID', 'nome': 'Nome', 'universidade': 'Universidade', 'data_admissao': 'Data Admissão', 
         'data_ult_renovacao_str': 'Renovado em:', 'status': 'Status', 'ultimo_ano': 'Ultimo Ano?',
         'proxima_renovacao': 'Proxima Renovação', 'data_vencimento': 'Termino de Contrato', 'obs': 'Observação'
     })
-    
     return df_proc
 
 def list_logs_df(start_date: Optional[date] = None, end_date: Optional[date] = None) -> pd.DataFrame:
     # Código inalterado
-    query = "SELECT timestamp, action, details FROM logs"
+    query = "SELECT timestamp, action, details FROM logs ORDER BY id DESC LIMIT 50"
     params = {}
     if start_date and end_date:
-        query += " WHERE date(timestamp) BETWEEN :start_date AND :end_date"
-        params = {'start_date': str(start_date), 'end_date': str(end_date)}
-    query += " ORDER BY id DESC LIMIT 50"
-    return pd.read_sql_query(query, get_db_connection(), params=params)
+        query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id DESC LIMIT 50"
+        params = (str(start_date), str(end_date))
+    df = pd.read_sql_query(query, get_read_connection(), params=params)
+    return df
 
 def exportar_logs_bytes(start_date: Optional[date] = None, end_date: Optional[date] = None) -> bytes:
     # Código inalterado
-    query = "SELECT timestamp, action, details FROM logs"
+    query = "SELECT timestamp, action, details FROM logs ORDER BY id ASC"
     params = {}
     if start_date and end_date:
-        query += " WHERE date(timestamp) BETWEEN :start_date AND :end_date"
-        params = {'start_date': str(start_date), 'end_date': str(end_date)}
-    query += " ORDER BY id ASC"
-    df = pd.read_sql_query(query, get_db_connection(), params=params)
+        query = "SELECT timestamp, action, details FROM logs WHERE date(timestamp) BETWEEN ? AND ? ORDER BY id ASC"
+        params = (str(start_date), str(end_date))
+    df = pd.read_sql_query(query, get_read_connection(), params=params)
     return df.to_string(index=False).encode('utf-8')
 
 def exportar_para_excel_bytes(df: pd.DataFrame) -> bytes:
@@ -489,6 +452,7 @@ def page_cadastro():
                         st.rerun()
 
 def page_base():
+    # Código inalterado
     st.header("Base de Dados de Estagiários")
     st.info("Abaixo está a lista completa de todos os estagiários cadastrados no sistema.")
     df_raw = get_estagiarios_df()
